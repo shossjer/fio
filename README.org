@@ -1,0 +1,15 @@
+* Fast Input Output
+
+  Some systems make it more difficult than others to output text to a
+  console. This project makes console interaction, and other stream
+  operations, easier.
+
+** But why?
+
+   * Multi-threaded programs need syncing mechanisms in order to
+     prevent garbled output.
+   * Windows need some extra care when dealing with Unicode. It does
+     not help that they like to use UTF16LE in their API
+     (i.e. ~wchar_t~).
+   * Windows have additional difficulties in how it handles redirected
+     streams.

@@ -1,0 +1,8 @@
+/*/
+
+!code/
+!dep/
+!plot/
+
+plot/*.dump
+plot/*.png
