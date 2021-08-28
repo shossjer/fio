@@ -10,6 +10,7 @@ set(FIOLIB_HEADERS
 	lib/fio/mem.hpp
 	lib/fio/stdint.hpp
 	lib/fio/stdio.hpp
+	lib/fio/to_chars.hpp
 	)
 
 set(FIOLIB_SECRETS

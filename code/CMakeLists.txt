@@ -28,7 +28,7 @@ if(FIO_BUILD_BENCHMARKS)
 		)
 	target_compile_options(fiobnc PRIVATE
 		$<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:
-			-Wall -Wextra -Wconversion -Werror>
+			-Wall -Wextra -Wconversion -Werror -march=native>
 		$<$<CXX_COMPILER_ID:MSVC>:
 			/W4 /WX /Zc:rvalueCast>
 		)

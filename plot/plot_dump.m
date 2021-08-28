@@ -43,8 +43,6 @@ function plot_dump(filename)
 
   if strcmp(style, 'plot')
     h = plot(xs, ys, '-o');
-
-    axis([(floor(minx / 10) * 10) (ceil(maxx / 10) * 10) (floor(miny / 5000) * 5000) (ceil(maxy / 5000) * 5000)])
   elseif strcmp(style, 'loglog')
     h = loglog(xs, ys, '-o');
   else
