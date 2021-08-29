@@ -121,6 +121,63 @@ if(FIO_BUILD_BENCHMARKS)
 		target_compile_definitions(fiobnc_features INTERFACE HAVE_ASMLIB)
 	endif()
 
+	# https://github.com/electronicarts/EAStdC
+	macro(_package_eastdc)
+		dep_package(eastdc-latest fio_eastdc
+			SUPPORTS_DEBUG
+			${ARGV}
+
+			FILES
+			EAStdC/EASprintf.h
+
+			LIBS
+			EAStdC
+			)
+	endmacro()
+
+	cmake_dependent_option(FIO_BUILD_EASTDC "Build eastdc" ON "POLICY CMP0097" OFF)
+	if(FIO_BUILD_EASTDC)
+		_package_eastdc(IGNORE_SYSTEM)
+
+		# note eastdc has a nasty recursive dependency between its submodules
+		# so we have to hack around it by not fetching the submodules when
+		# cloning but instead postpone it and make an explicit request to
+		# fetch the submodules later; this is why we require POLICY CMP0097
+		# (available since version 3.14)
+		#
+		# https://gitlab.kitware.com/cmake/cmake/-/issues/19832
+		#
+		# furthermore, the latest version of the library is missing an
+		# install target and recursive calls to its dependencies, so we use
+		# this DIY version of the library instead
+		dep_build(eastdc-unknown
+			POLICY_CMP0097
+			FIND_GIT
+			SUPPORTS_DEBUG
+
+			DOWNLOAD_STEP
+			GIT_REPOSITORY "https://github.com/shossjer/EAStdC.git"
+			GIT_TAG "install"
+			GIT_SUBMODULES ""
+			GIT_SHALLOW True
+
+			UPDATE_STEP
+			UPDATE_COMMAND "${CMAKE_COMMAND}" -E chdir "\$\{_source_dir\}" "\$\{GIT_EXECUTABLE\}" submodule update --init "test/packages/EABase" "test/packages/EAAssert" "test/packages/EAThread"
+			COMMAND "${CMAKE_COMMAND}" -E touch "\$\{_source_dir\}/CommonCppFlags"
+			COMMAND "${CMAKE_COMMAND}" -E touch "\$\{_source_dir\}/test/packages/EAAssert/CommonCppFlags"
+			COMMAND "${CMAKE_COMMAND}" -E touch "\$\{_source_dir\}/test/packages/EAThread/CommonCppFlags"
+
+			CMAKE_OPTIONS
+			-DEASTDC_BUILD_TESTS=OFF
+			)
+	endif()
+
+	_package_eastdc()
+	if(TARGET fio_eastdc)
+		target_link_libraries(fiobnc_features INTERFACE fio_eastdc)
+		target_compile_definitions(fiobnc_features INTERFACE HAVE_EASTDC)
+	endif()
+
 	# https://github.com/fmtlib/fmt
 	macro(_package_fmt)
 		dep_package(fmt-8.0.1 fio_fmt

@@ -9,6 +9,10 @@
 # include <charconv>
 #endif
 
+#if HAVE_EASTDC
+# include <EAStdC/EASprintf.h>
+#endif
+
 #if HAVE_FMT
 # include <fmt/core.h>
 #endif
@@ -58,6 +62,21 @@ TEST_CASE("to_chars sint8", "[.][dump]")
 			{
 				const fio::sint8 val = static_cast<fio::sint8>(num + (n & (num - 1)));
 				return ::_itoa(val, buffer + 0, 10);
+			});
+		};
+#endif
+
+#if HAVE_EASTDC
+		BENCHMARK_GROUP("Sprintf (eastdc)")(Catch::Benchmark::Groupometer meter)
+		{
+			const fio::uint8 num = static_cast<fio::uint8>(1u << meter.size());
+
+			char buffer[1 + 16];
+
+			meter.measure([&](int n)
+			{
+				const fio::sint8 val = static_cast<fio::sint8>(num + (n & (num - 1)));
+				return EA::StdC::Sprintf(buffer + 0, "%I8d", val);
 			});
 		};
 #endif
@@ -141,6 +160,21 @@ TEST_CASE("to_chars sint16", "[.][dump]")
 		};
 #endif
 
+#if HAVE_EASTDC
+		BENCHMARK_GROUP("Sprintf (eastdc)")(Catch::Benchmark::Groupometer meter)
+		{
+			const fio::uint16 num = static_cast<fio::uint16>(1u << meter.size());
+
+			char buffer[1 + 16];
+
+			meter.measure([&](int n)
+			{
+				const fio::sint16 val = static_cast<fio::sint16>(num + (n & (num - 1)));
+				return EA::StdC::Sprintf(buffer + 0, "%I16d", val);
+			});
+		};
+#endif
+
 #if HAVE_FMT
 		BENCHMARK_GROUP("format\\_to (fmt)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -220,6 +254,21 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 		};
 #endif
 
+#if HAVE_EASTDC
+		BENCHMARK_GROUP("Sprintf (eastdc)")(Catch::Benchmark::Groupometer meter)
+		{
+			const fio::uint32 num = static_cast<fio::uint32>(1u << meter.size());
+
+			char buffer[1 + 16];
+
+			meter.measure([&](int n)
+			{
+				const fio::sint32 val = num + (n & (num - 1));
+				return EA::StdC::Sprintf(buffer + 0, "%I32d", val);
+			});
+		};
+#endif
+
 #if HAVE_FMT
 		BENCHMARK_GROUP("format\\_to (fmt)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -295,6 +344,21 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 			{
 				const fio::sint64 val = num + (n & (num - 1));
 				return ::_i64toa(val, buffer + 0, 10);
+			});
+		};
+#endif
+
+#if HAVE_EASTDC
+		BENCHMARK_GROUP("Sprintf (eastdc)")(Catch::Benchmark::Groupometer meter)
+		{
+			const fio::uint64 num = static_cast<fio::uint64>(1ull << meter.size());
+
+			char buffer[1 + 32];
+
+			meter.measure([&](int n)
+			{
+				const fio::sint64 val = num + (n & (num - 1));
+				return EA::StdC::Sprintf(buffer + 0, "%I64d", val);
 			});
 		};
 #endif

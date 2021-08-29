@@ -1,4 +1,5 @@
 set(FIOBNC_SOURCES
+	bnc/eastdchacks.cpp
 	bnc/main.cpp
 	bnc/fio/mem.cpp
 	bnc/fio/stdio.cpp
