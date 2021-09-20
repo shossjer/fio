@@ -218,7 +218,7 @@ TEST_CASE("", "")
 
 TEST_CASE("console_output_utf8", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/console_output_utf8.dump", log_style, 1, 16)
+	BENCHMARK_DUMP("plot/console_output_utf8.dump", log_style, 1, 16, "#bytes")
 	{
 		BENCHMARK_GROUP("puts (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -351,7 +351,7 @@ TEST_CASE("console_output_utf8", "[.][dump]")
 
 TEST_CASE("write_stdout_utf8", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/write_stdout_utf8.dump", log_style, 1, 16)
+	BENCHMARK_DUMP("plot/write_stdout_utf8.dump", log_style, 1, 16, "#bytes")
 	{
 #if defined(_MSC_VER)
 

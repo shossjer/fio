@@ -19,7 +19,7 @@
 
 TEST_CASE("from_chars sint8", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_sint8.dump", lin_style, 1, 4, 1)
+	BENCHMARK_DUMP("plot/from_chars_sint8.dump", lin_style, 1, 4, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -96,7 +96,7 @@ TEST_CASE("from_chars sint8", "[.][dump]")
 
 TEST_CASE("from_chars uint8", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_uint8.dump", lin_style, 1, 4, 1)
+	BENCHMARK_DUMP("plot/from_chars_uint8.dump", lin_style, 1, 4, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -173,7 +173,7 @@ TEST_CASE("from_chars uint8", "[.][dump]")
 
 TEST_CASE("from_chars sint16", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_sint16.dump", lin_style, 1, 6, 1)
+	BENCHMARK_DUMP("plot/from_chars_sint16.dump", lin_style, 1, 6, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -250,7 +250,7 @@ TEST_CASE("from_chars sint16", "[.][dump]")
 
 TEST_CASE("from_chars uint16", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_uint16.dump", lin_style, 1, 6, 1)
+	BENCHMARK_DUMP("plot/from_chars_uint16.dump", lin_style, 1, 6, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -327,7 +327,7 @@ TEST_CASE("from_chars uint16", "[.][dump]")
 
 TEST_CASE("from_chars sint32", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_sint32.dump", lin_style, 1, 11, 1)
+	BENCHMARK_DUMP("plot/from_chars_sint32.dump", lin_style, 1, 11, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -404,7 +404,7 @@ TEST_CASE("from_chars sint32", "[.][dump]")
 
 TEST_CASE("from_chars uint32", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_uint32.dump", lin_style, 1, 11, 1)
+	BENCHMARK_DUMP("plot/from_chars_uint32.dump", lin_style, 1, 11, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -481,7 +481,7 @@ TEST_CASE("from_chars uint32", "[.][dump]")
 
 TEST_CASE("from_chars sint64", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_sint64.dump", lin_style, 1, 20, 1)
+	BENCHMARK_DUMP("plot/from_chars_sint64.dump", lin_style, 1, 20, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -558,7 +558,7 @@ TEST_CASE("from_chars sint64", "[.][dump]")
 
 TEST_CASE("from_chars uint64", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/from_chars_uint64.dump", lin_style, 1, 21, 1)
+	BENCHMARK_DUMP("plot/from_chars_uint64.dump", lin_style, 1, 21, 1, "#digits")
 	{
 		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{

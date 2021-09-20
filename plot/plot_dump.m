@@ -9,6 +9,8 @@ function plot_dump(filename)
   endif
 
   style = fscanf(fid, "style %s\n");
+  fscanf(fid, "xlabel ");
+  xname = fgetl(fid);
   nresults = fscanf(fid, "results %u\n");
   results = struct("name", {}, "points", {}, "samples", {}, "xs", {}, "ys", {});
 
@@ -45,6 +47,8 @@ function plot_dump(filename)
   endif
 
   legend(results(:).name, "location", "northwest");
+  xlabel(xname);
+  ylabel("nanoseconds");
   hold on;
   set(gca,'ColorOrderIndex',1);
 

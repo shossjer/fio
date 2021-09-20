@@ -45,6 +45,7 @@ namespace Catch
 				};
 
 				const char * filename;
+				const char * xlabel;
 
 				int type; // linear(0) or logarithmic(1)
 				//int reps;
@@ -65,6 +66,7 @@ namespace Catch
 #endif
 					{
 						std::fprintf(file, type == 0 ? "style plot\n" : "style loglog\n");
+						std::fprintf(file, "xlabel %s\n", xlabel);
 						std::fprintf(file, "results %u\n", static_cast<unsigned int>(groups.size()));
 
 						for (unsigned int i = 0; i < groups.size(); i++)
@@ -89,8 +91,9 @@ namespace Catch
 					}
 				}
 
-				explicit Dump(const char * filename, lin_type/*, int reps*/, unsigned int from, unsigned int to, unsigned int step)
+				explicit Dump(const char * filename, lin_type/*, int reps*/, unsigned int from, unsigned int to, unsigned int step, const char * xlabel = "")
 					: filename(filename)
+					, xlabel(xlabel)
 					, type(0)
 					//, reps(reps)
 				{
@@ -106,8 +109,9 @@ namespace Catch
 					}
 				}
 
-				explicit Dump(const char * filename, log_type/*, int reps*/, unsigned char from, unsigned char to)
+				explicit Dump(const char * filename, log_type/*, int reps*/, unsigned char from, unsigned char to, const char * xlabel = "")
 					: filename(filename)
+					, xlabel(xlabel)
 					, type(1)
 					//, reps(reps)
 				{

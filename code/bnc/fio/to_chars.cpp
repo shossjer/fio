@@ -19,7 +19,7 @@
 
 TEST_CASE("to_chars sint8", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/to_chars_sint8.dump", lin_style, 0, 8, 1)
+	BENCHMARK_DUMP("plot/to_chars_sint8.dump", lin_style, 0, 8, 1, "highest set bit")
 	{
 		BENCHMARK_GROUP("sprintf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -113,7 +113,7 @@ TEST_CASE("to_chars sint8", "[.][dump]")
 
 TEST_CASE("to_chars sint16", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/to_chars_sint16.dump", lin_style, 0, 16, 1)
+	BENCHMARK_DUMP("plot/to_chars_sint16.dump", lin_style, 0, 16, 1, "highest set bit")
 	{
 		BENCHMARK_GROUP("sprintf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -207,7 +207,7 @@ TEST_CASE("to_chars sint16", "[.][dump]")
 
 TEST_CASE("to_chars sint32", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/to_chars_sint32.dump", lin_style, 0, 32, 1)
+	BENCHMARK_DUMP("plot/to_chars_sint32.dump", lin_style, 0, 32, 1, "highest set bit")
 	{
 		BENCHMARK_GROUP("sprintf (std)")(Catch::Benchmark::Groupometer meter)
 		{
@@ -301,7 +301,7 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 TEST_CASE("to_chars sint64", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/to_chars_snint64.dump", lin_style, 0, 64, 1)
+	BENCHMARK_DUMP("plot/to_chars_sint64.dump", lin_style, 0, 64, 1, "highest set bit")
 	{
 		BENCHMARK_GROUP("sprintf (std)")(Catch::Benchmark::Groupometer meter)
 		{

@@ -20,7 +20,7 @@ namespace
 
 TEST_CASE("memcpy", "[.][dump]")
 {
-	BENCHMARK_DUMP("plot/memcpy.dump", log_style, 1, 20)
+	BENCHMARK_DUMP("plot/memcpy.dump", log_style, 1, 20, "#bytes")
 	{
 		BENCHMARK_GROUP("memcpy (std)")(Catch::Benchmark::Groupometer meter)
 		{
