@@ -6,6 +6,7 @@ set(FIOLIB_SOURCES
 
 set(FIOLIB_HEADERS
 	lib/fio/compiler.hpp
+	lib/fio/from_chars.hpp
 	lib/fio/io.hpp
 	lib/fio/mem.hpp
 	lib/fio/stdint.hpp
