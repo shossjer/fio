@@ -42,9 +42,9 @@ function plot_dump(filename)
   maxy = max(max(ys));
 
   if strcmp(style, 'plot')
-    h = plot(xs, ys, '-o');
+    h = plot(xs, ys', '-o');
   elseif strcmp(style, 'loglog')
-    h = loglog(xs, ys, '-o');
+    h = loglog(xs, ys', '-o');
   else
     error("unknown style");
   endif
@@ -58,9 +58,9 @@ function plot_dump(filename)
   endfor
 
   if strcmp(style, 'plot')
-    h = plot(xs, ys, ':');
+    h = plot(xs, ys', ':');
   elseif strcmp(style, 'loglog')
-    h = loglog(xs, ys, ':');
+    h = loglog(xs, ys', ':');
   else
     error("unknown style");
   endif
