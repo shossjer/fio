@@ -36,11 +36,6 @@ function plot_dump(filename)
     ys(r, :) = mean(results(r).ys);
   endfor
 
-  minx = min(xs);
-  maxx = max(xs);
-  miny = min(min(ys));
-  maxy = max(max(ys));
-
   if strcmp(style, 'plot')
     h = plot(xs, ys', '-o');
   elseif strcmp(style, 'loglog')
