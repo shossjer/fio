@@ -2,14 +2,58 @@
 
   Some systems make it more difficult than others to output text to a
   console. This project makes console interaction, and other stream
-  operations, easier.
+  operations, easier (and sometimes faster).
 
 ** But why?
 
-   * Multi-threaded programs need syncing mechanisms in order to
-     prevent garbled output.
    * Windows need some extra care when dealing with Unicode. It does
-     not help that they like to use UTF16LE in their API
-     (i.e. ~wchar_t~).
+     not help that they like to use UTF16LE (i.e. ~wchar_t~) in their
+     API either.
    * Windows have additional difficulties in how it handles redirected
      streams.
+
+** Benchmarks
+
+   This library can be configured to build a benchmarking executable
+   via the CMake option ~FIO_BUILD_BENCHMARKS~. When enabled, CMake
+   will download and install third-party libraries to compare against
+   but those can be disabled via the ~FIO_BUILD_~-family of options.
+
+   Run the executable with the argument ~-l~ or ~--lists-tests~ in
+   order to list all available benchmarks.
+
+   For more details on the available commands, see the documentation
+   of Catch2 (https://github.com/catchorg/Catch2).
+
+*** Plots
+
+    The benchmarks output ~.dump~-files (in the directory ~plot~) that
+    can be plotted via ~GNU Octave~.
+
+**** from_chars sint64
+
+     *MSVC-19.27.29112.0*
+     [[file:plot/from_chars_sint64_msvc_19.27.29112.0.png]]
+
+     *WSL-GCC-8.4.0*
+     [[file:plot/from_chars_sint64_wsl_gcc_8.4.0.png]]
+
+     Generate the plot yourself by running something like
+     #+begin_src
+     ./build/fiobnc --benchmark-samples 1000 "from_chars sint64"
+     octave --path ./plot --eval "plot_dump('plot/from_chars_sint64.dump');"
+     #+end_src
+
+**** to_chars sint64
+
+     *MSVC-19.27.29112.0*
+     [[file:plot/to_chars_sint64_msvc_19.27.29112.0.png]]
+
+     *WSL-GCC-8.4.0*
+     [[file:plot/to_chars_sint64_wsl_gcc_8.4.0.png]]
+
+     Generate the plot yourself by running something like
+     #+begin_src
+     ./build/fiobnc --benchmark-samples 1000 "to_chars sint64"
+     octave --path ./plot --eval "plot_dump('plot/to_chars_sint64.dump');"
+     #+end_src
