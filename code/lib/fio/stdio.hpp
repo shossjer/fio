@@ -56,4 +56,64 @@ namespace fio
 	}
 
 #endif
+
+	class stdostream
+	{
+	private:
+
+		static stdostream & this_ref(); // note hack
+
+	public:
+
+		template <unsigned long long N>
+		fio_inline stdostream & operator << (const char (& x)[N])
+		{
+			extern io_type io_stdout;
+			extern fio_thread write_buffer buffer_stdout;
+
+			write(io_stdout, buffer_stdout, x + 0, x + N - 1);
+
+			return *this;
+		}
+
+#if defined(_MSC_VER)
+
+		template <unsigned long long N>
+		fio_inline stdostream & operator << (const wchar_t (& x)[N])
+		{
+			extern io_type io_stdout;
+			extern fio_thread write_buffer buffer_stdout;
+
+			write(io_stdout, buffer_stdout, x + 0, x + N - 1);
+
+			return *this;
+		}
+
+#endif
+
+		template <typename T>
+		fio_inline auto operator << (const T & x)
+			-> decltype(begin(x), end(x), this_ref())
+		{
+			extern io_type io_stdout;
+			extern fio_thread write_buffer buffer_stdout;
+
+			write(io_stdout, buffer_stdout, begin(x), end(x));
+
+			return *this;
+		}
+
+		template <typename T>
+		fio_inline auto operator << (const T & x)
+			-> decltype(to_chars(x, nullptr), this_ref())
+		{
+			extern io_type io_stdout;
+			extern fio_thread write_buffer buffer_stdout;
+
+			write(io_stdout, buffer_stdout, x);
+
+			return *this;
+		}
+
+	};
 }

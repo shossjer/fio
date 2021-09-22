@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fio/mem.hpp"
+#include "fio/to_chars.hpp"
 
 #if defined(_MSC_VER)
 # include <windows.h>
@@ -233,4 +234,45 @@ namespace fio
 	}
 
 #endif
+
+	template <typename T>
+	inline auto write(io_type & io, write_buffer & buffer, T value, bool flush)
+		-> decltype(to_chars(value, nullptr), usize())
+	{
+#if defined(_MSC_VER)
+		if (buffer.size < 0) // utfw
+		{
+			const usize wrote = io.write(reinterpret_cast<const wchar_t *>(buffer.data), -buffer.size / sizeof(wchar_t));
+			if (!fio_expect(wrote == static_cast<usize>(-buffer.size / sizeof(wchar_t))))
+				return 0; // todo memcpy(buffer.data + wrote, buffer.data, -(buffer.size = -(-buffer.size - wrote * sizeof(wchar_t))));
+
+			buffer.size = 0;
+		}
+#endif
+
+		if (!fio_expect(static_cast<usize>(buffer.capacity - buffer.size) >= 32)) // todo 32 for 64bit numbers, else 16
+			return 0;
+
+		char * const begin = buffer.data + buffer.size;
+
+		char * const end = to_chars(value, begin);
+
+		const usize size = end - begin;
+		const usize next_size = end - buffer.data;
+
+		if (next_size > buffer.flushlim || flush)
+		{
+			const usize wrote = io.write(buffer.data, next_size);
+			if (!fio_expect(wrote == next_size))
+				return size; // todo memcpy(buffer.data + wrote, buffer.data, buffer.size = (next_size - wrote));
+
+			buffer.size = 0;
+		}
+		else
+		{
+			buffer.size = static_cast<short>(next_size);
+		}
+
+		return size;
+	}
 }
