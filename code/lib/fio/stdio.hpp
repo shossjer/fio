@@ -57,21 +57,77 @@ namespace fio
 
 #endif
 
+	template <typename T>
+	fio_inline auto write_stdout(T value, bool flush = false)
+		-> decltype(to_chars(value, nullptr), usize())
+	{
+		extern io_type io_stdout;
+		extern fio_thread write_buffer buffer_stdout;
+
+		return write(io_stdout, buffer_stdout, value, flush);
+	}
+
+	template <typename T, unsigned long long N>
+	fio_inline constexpr T * begin(T (& x)[N]) { return x + 0; }
+
+	template <typename T, unsigned long long N>
+	fio_inline constexpr T * end(T (& x)[N]) { return x + N; }
+
+	template <typename T>
+	fio_inline constexpr T * to_address(T * x) { return x; }
+
+	template <typename T>
+	fio_inline constexpr auto to_address(const T & x) -> decltype(x.operator->()) { return x.operator->(); }
+
 	class stdostream
 	{
 	private:
 
 		static stdostream & this_ref(); // note hack
 
+		static stdostream & is_actually_arithmetic(const signed char *);
+		static stdostream & is_actually_arithmetic(const short *);
+		static stdostream & is_actually_arithmetic(const int *);
+		static stdostream & is_actually_arithmetic(const long *);
+		static stdostream & is_actually_arithmetic(const long long *);
+		static stdostream & is_actually_arithmetic(const unsigned char *);
+		static stdostream & is_actually_arithmetic(const unsigned short *);
+		static stdostream & is_actually_arithmetic(const unsigned int *);
+		static stdostream & is_actually_arithmetic(const unsigned long *);
+		static stdostream & is_actually_arithmetic(const unsigned long long *);
+		static stdostream & is_actually_arithmetic(const float *);
+		static stdostream & is_actually_arithmetic(const double *);
+		static stdostream & is_actually_arithmetic(const long double *);
+
+		template <typename T>
+		static stdostream & is_actually_pointer(T *); // note hack
+
 	public:
+
+		operator bool() const { return true; } // todo error state
+
+		fio_inline stdostream & write(const char * data, usize size)
+		{
+			write_stdout(data, size);
+
+			return *this;
+		}
+
+#if defined(_MSC_VER)
+
+		fio_inline stdostream & write(const wchar_t * data, usize size)
+		{
+			write_stdout(data, size);
+
+			return *this;
+		}
+
+#endif
 
 		template <unsigned long long N>
 		fio_inline stdostream & operator << (const char (& x)[N])
 		{
-			extern io_type io_stdout;
-			extern fio_thread write_buffer buffer_stdout;
-
-			write(io_stdout, buffer_stdout, x + 0, x + N - 1);
+			write_stdout(x + 0, N - 1);
 
 			return *this;
 		}
@@ -81,10 +137,42 @@ namespace fio
 		template <unsigned long long N>
 		fio_inline stdostream & operator << (const wchar_t (& x)[N])
 		{
-			extern io_type io_stdout;
-			extern fio_thread write_buffer buffer_stdout;
+			write_stdout(x + 0, N - 1);
 
-			write(io_stdout, buffer_stdout, x + 0, x + N - 1);
+			return *this;
+		}
+
+#endif
+
+		// disable printing of character pointers (well, all pointers
+		// actually), otherwise conversion to bool would be used
+		//
+		// https://stackoverflow.com/a/28243509
+		template <typename T>
+		fio_inline auto operator << (const T & x)
+			-> decltype(is_actually_pointer(x)) = delete;
+
+		fio_inline stdostream & operator << (bool x)
+		{
+			const char * const str = "01";
+
+			write_stdout(str + static_cast<int>(x), 1);
+
+			return *this;
+		}
+
+		fio_inline stdostream & operator << (char x)
+		{
+			write_stdout(&x, 1);
+
+			return *this;
+		}
+
+#if defined(_MSC_VER)
+
+		fio_inline stdostream & operator << (wchar_t x)
+		{
+			write_stdout(&x, 1);
 
 			return *this;
 		}
@@ -93,24 +181,18 @@ namespace fio
 
 		template <typename T>
 		fio_inline auto operator << (const T & x)
-			-> decltype(begin(x), end(x), this_ref())
+			-> decltype(write_stdout(to_address(begin(x)), to_address(end(x))), this_ref())
 		{
-			extern io_type io_stdout;
-			extern fio_thread write_buffer buffer_stdout;
-
-			write(io_stdout, buffer_stdout, begin(x), end(x));
+			write_stdout(to_address(begin(x)), to_address(end(x)));
 
 			return *this;
 		}
 
 		template <typename T>
 		fio_inline auto operator << (const T & x)
-			-> decltype(to_chars(x, nullptr), this_ref())
+			-> decltype(write_stdout(x), is_actually_arithmetic(&x))
 		{
-			extern io_type io_stdout;
-			extern fio_thread write_buffer buffer_stdout;
-
-			write(io_stdout, buffer_stdout, x);
+			write_stdout(x);
 
 			return *this;
 		}
