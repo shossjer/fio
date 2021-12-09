@@ -236,7 +236,7 @@ namespace fio
 #endif
 
 	template <typename T>
-	inline auto write(io_type & io, write_buffer & buffer, T value, bool flush)
+	inline auto write(io_type & io, write_buffer & buffer, T value, bool flush = false)
 		-> decltype(to_chars(value, nullptr), usize())
 	{
 #if defined(_MSC_VER)
