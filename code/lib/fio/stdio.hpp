@@ -79,6 +79,7 @@ namespace fio
 	template <typename T>
 	fio_inline constexpr auto to_address(const T & x) -> decltype(x.operator->()) { return x.operator->(); }
 
+	template <typename Buffer>
 	class stdostream
 	{
 	private:
@@ -102,47 +103,38 @@ namespace fio
 		template <typename T>
 		static stdostream & is_actually_pointer(T *); // note hack
 
+	private:
+
+		Buffer buffer_;
+
+	public:
+
+		~stdostream()
+		{
+			write_stdout(data(buffer_), size(buffer_), true);
+		}
+
 	public:
 
 		operator bool() const { return true; } // todo error state
 
-		fio_inline stdostream & write(const char * data, usize size)
+		template <typename T>
+		fio_inline auto write(const T * data, usize size)
+			-> decltype(append(buffer_, data + 0, data + size), this_ref())
 		{
-			write_stdout(data, size);
+			append(buffer_, data + 0, data + size);
 
 			return *this;
 		}
 
-#if defined(_MSC_VER)
-
-		fio_inline stdostream & write(const wchar_t * data, usize size)
+		template <typename T, unsigned long long N>
+		fio_inline auto write(const T (& x)[N])
+			-> decltype(append(buffer_, x + 0, x + N - 1), this_ref())
 		{
-			write_stdout(data, size);
+			append(buffer_, x + 0, x + N - 1);
 
 			return *this;
 		}
-
-#endif
-
-		template <unsigned long long N>
-		fio_inline stdostream & operator << (const char (& x)[N])
-		{
-			write_stdout(x + 0, N - 1);
-
-			return *this;
-		}
-
-#if defined(_MSC_VER)
-
-		template <unsigned long long N>
-		fio_inline stdostream & operator << (const wchar_t (& x)[N])
-		{
-			write_stdout(x + 0, N - 1);
-
-			return *this;
-		}
-
-#endif
 
 		// disable printing of character pointers (well, all pointers
 		// actually), otherwise conversion to bool would be used
@@ -156,44 +148,37 @@ namespace fio
 		{
 			const char * const str = "01";
 
-			write_stdout(str + static_cast<int>(x), 1);
+			append(buffer_, str + static_cast<int>(x), str + static_cast<int>(x) + 1);
 
 			return *this;
 		}
-
-		fio_inline stdostream & operator << (char x)
-		{
-			write_stdout(&x, 1);
-
-			return *this;
-		}
-
-#if defined(_MSC_VER)
-
-		fio_inline stdostream & operator << (wchar_t x)
-		{
-			write_stdout(&x, 1);
-
-			return *this;
-		}
-
-#endif
 
 		template <typename T>
-		fio_inline auto operator << (const T & x)
-			-> decltype(write_stdout(to_address(begin(x)), to_address(end(x))), this_ref())
+		fio_inline auto write(T x)
+			-> decltype(append(buffer_, &x + 0, &x + 1), this_ref())
 		{
-			write_stdout(to_address(begin(x)), to_address(end(x)));
+			append(buffer_, &x + 0, &x + 1);
 
 			return *this;
 		}
 
 		template <typename T>
 		fio_inline auto operator << (const T & x)
-			-> decltype(write_stdout(x), is_actually_arithmetic(&x))
+			-> decltype(append(buffer_, begin(x), end(x)), this_ref())
 		{
-			write_stdout(x);
+			append(buffer_, begin(x), end(x));
 
+			return *this;
+		}
+
+		template <typename T>
+		fio_inline auto operator << (const T & x)
+			-> decltype(to_chars(x, nullptr), is_actually_arithmetic(&x))
+		{
+			if (reserve(buffer_, size(buffer_) + 32)) // todo 32 for 64bit numbers, else 16
+			{
+				reduce(buffer_, to_chars(value, data(buffer_) + size(buffer_)));
+			}
 			return *this;
 		}
 
