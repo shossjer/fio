@@ -19,53 +19,34 @@ namespace fio
 
 #endif
 
-	fio_inline bool flush_stdout()
+	fio_inline usize write_stdout(const char * data, usize size)
 	{
 		extern io_type io_stdout;
-		extern fio_thread write_buffer buffer_stdout;
 
-		return flush(io_stdout, buffer_stdout);
+		return io_stdout.write(data, size);
 	}
 
-	fio_inline usize write_stdout(const char * data, usize size, bool flush = false)
+	fio_inline const char * write_stdout(const char * begin, const char * end)
 	{
-		extern io_type io_stdout;
-		extern fio_thread write_buffer buffer_stdout;
-
-		return write(io_stdout, buffer_stdout, data, size, flush);
-	}
-
-	fio_inline const char * write_stdout(const char * begin, const char * end, bool flush = false)
-	{
-		return begin + write_stdout(begin, static_cast<usize>(end - begin), flush);
+		return begin + write_stdout(begin, static_cast<usize>(end - begin));
 	}
 
 #if defined(_MSC_VER)
 
-	fio_inline usize write_stdout(const wchar_t * data, usize size, bool flush = false)
+	fio_inline usize write_stdout(const wchar_t * data, usize size)
 	{
 		extern io_type io_stdout;
-		extern fio_thread write_buffer buffer_stdout;
 
-		return write(io_stdout, buffer_stdout, data, size, flush);
+		return io_stdout.write(data, size);
 	}
 
-	fio_inline const wchar_t * write_stdout(const wchar_t * begin, const wchar_t * end, bool flush = false)
+	fio_inline const wchar_t * write_stdout(const wchar_t * begin, const wchar_t * end)
 	{
-		return begin + write_stdout(begin, end - begin, flush);
+		return begin + write_stdout(begin, end - begin);
 	}
 
 #endif
 
-	template <typename T>
-	fio_inline auto write_stdout(T value, bool flush = false)
-		-> decltype(to_chars(value, nullptr), usize())
-	{
-		extern io_type io_stdout;
-		extern fio_thread write_buffer buffer_stdout;
-
-		return write(io_stdout, buffer_stdout, value, flush);
-	}
 
 	template <typename T, unsigned long long N>
 	fio_inline constexpr T * begin(T (& x)[N]) { return x + 0; }
@@ -103,6 +84,10 @@ namespace fio
 		template <typename T>
 		static stdostream & is_actually_pointer(T *); // note hack
 
+	public:
+
+		using char_type = typename Buffer::value_type;
+
 	private:
 
 		Buffer buffer_;
@@ -111,12 +96,36 @@ namespace fio
 
 		~stdostream()
 		{
-			write_stdout(data(buffer_), size(buffer_), true);
+			usize remaining = size(buffer_);
+			char_type * end = data(buffer_) + remaining;
+			do
+			{
+				remaining -= write_stdout(end - remaining, remaining);
+			}
+			while (remaining > 0);
 		}
 
 	public:
 
 		operator bool() const { return true; } // todo error state
+
+		Buffer & buffer() { return buffer_; }
+		const Buffer & buffer() const { return buffer_; }
+
+		stdostream & flush()
+		{
+			usize remaining = size(buffer_);
+			char_type * end = data(buffer_) + remaining;
+			do
+			{
+				remaining -= write_stdout(end - remaining, remaining);
+			}
+			while (remaining > 0);
+
+			clear(buffer_);
+
+			return *this;
+		}
 
 		template <typename T>
 		fio_inline auto write(const T * data, usize size)
@@ -128,7 +137,7 @@ namespace fio
 		}
 
 		template <typename T, unsigned long long N>
-		fio_inline auto write(const T (& x)[N])
+		fio_inline auto operator << (const T (& x)[N])
 			-> decltype(append(buffer_, x + 0, x + N - 1), this_ref())
 		{
 			append(buffer_, x + 0, x + N - 1);
@@ -146,15 +155,15 @@ namespace fio
 
 		fio_inline stdostream & operator << (bool x)
 		{
-			const char * const str = "01";
+			char_type digits[2] = {static_cast<char_type>('0'), static_cast<char_type>('1')};
 
-			append(buffer_, str + static_cast<int>(x), str + static_cast<int>(x) + 1);
+			append(buffer_, digits + static_cast<int>(x), digits + static_cast<int>(x) + 1);
 
 			return *this;
 		}
 
 		template <typename T>
-		fio_inline auto write(T x)
+		fio_inline auto operator << (T x)
 			-> decltype(append(buffer_, &x + 0, &x + 1), this_ref())
 		{
 			append(buffer_, &x + 0, &x + 1);
@@ -177,7 +186,7 @@ namespace fio
 		{
 			if (reserve(buffer_, size(buffer_) + 32)) // todo 32 for 64bit numbers, else 16
 			{
-				reduce(buffer_, to_chars(value, data(buffer_) + size(buffer_)));
+				reduce(buffer_, to_chars(x, data(buffer_) + size(buffer_)));
 			}
 			return *this;
 		}

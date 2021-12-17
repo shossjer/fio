@@ -349,89 +349,43 @@ TEST_CASE("console_output_utf8", "[.][dump]")
 	}
 }
 
-TEST_CASE("write_stdout_utf8", "[.][dump]")
+namespace
 {
-	BENCHMARK_DUMP("plot/write_stdout_utf8.dump", log_style, 1, 16, "#bytes")
+	struct MyBuffer
 	{
-#if defined(_MSC_VER)
+		using value_type = char;
 
-		BENCHMARK_GROUP("WriteFile (win32)")(Catch::Benchmark::Groupometer meter)
-		{
-			ScopedConsoleOutputCP console_ouput_utf8(65001); // utf8
+		std::vector<char> chars_;
+	};
 
-			HANDLE hOut = ::CreateFileW(L"CON", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
-			REQUIRE(hOut != INVALID_HANDLE_VALUE);
+	char * data(MyBuffer & x) { return x.chars_.data(); }
+	size_t size(MyBuffer & x) { return x.chars_.size(); }
 
-			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
-			buffer_utf8.push_back(char{'\n'});
+	void clear(MyBuffer & x)
+	{
+		x.chars_.clear();
+	}
 
-			meter.measure([&](int)
-			{
-				return ::WriteFile(hOut, buffer_utf8.data(), static_cast<DWORD>(buffer_utf8.size()) * sizeof(char), nullptr, nullptr);
-			});
-		};
+	void append_impl(MyBuffer & x, const char * begin, const char * end)
+	{
+		x.chars_.insert(x.chars_.end(), begin, end);
+	}
 
-		BENCHMARK_GROUP("memcpy (std) + WriteFile (win32)")(Catch::Benchmark::Groupometer meter)
-		{
-			ScopedConsoleOutputCP console_ouput_utf8(65001); // utf8
+	using fio::to_address;
 
-			HANDLE hOut = ::CreateFileW(L"CON", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
-			REQUIRE(hOut != INVALID_HANDLE_VALUE);
+	template <typename Begin, typename End>
+	auto append(MyBuffer & x, Begin begin, End end)
+		-> decltype(append_impl(x, to_address(begin), to_address(end)), void())
+	{
+		append_impl(x, to_address(begin), to_address(end));
+	}
+}
 
-			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
-			buffer_utf8.push_back(char{'\n'});
-
-			std::vector<char> write_buffer(buffer_utf8.size() * meter.runs());
-
-			meter.measure([&](int n)
-			{
-				std::memcpy(write_buffer.data() + n * buffer_utf8.size(), buffer_utf8.data(), buffer_utf8.size() * sizeof(char));
-
-				if (n == meter.runs() - 1)
-				{
-					::WriteFile(hOut, write_buffer.data(), static_cast<DWORD>(write_buffer.size()) * sizeof(char), nullptr, nullptr);
-				}
-			});
-		};
-
-#else
-
-		BENCHMARK_GROUP("write (posix)")(Catch::Benchmark::Groupometer meter)
-		{
-			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
-			buffer_utf8.push_back(char{'\n'});
-
-			meter.measure([&](int)
-			{
-				return ::write(STDOUT_FILENO, buffer_utf8.data(), buffer_utf8.size() * sizeof(char));
-			});
-		};
-
-		BENCHMARK_GROUP("memcpy (std) + write (posix)")(Catch::Benchmark::Groupometer meter)
-		{
-			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
-			buffer_utf8.push_back(char{'\n'});
-
-			std::vector<char> write_buffer(buffer_utf8.size() * static_cast<unsigned int>(meter.runs()));
-
-			meter.measure([&](int n)
-			{
-				std::memcpy(write_buffer.data() + static_cast<unsigned int>(n) * buffer_utf8.size(), buffer_utf8.data(), buffer_utf8.size() * sizeof(char));
-
-				if (n == meter.runs() - 1)
-				{
-					return ::write(STDOUT_FILENO, write_buffer.data(), write_buffer.size() * sizeof(char));
-				}
-				else
-				{
-					return ssize_t{};
-				}
-			});
-		};
-
-#endif
-
-		BENCHMARK_GROUP("write\\_stdout")(Catch::Benchmark::Groupometer meter)
+TEST_CASE("cout chars", "[.][dump]")
+{
+	BENCHMARK_DUMP("plot/cout-chars.dump", log_style, 1, 8, "#chars")
+	{
+		BENCHMARK_GROUP("cout + flush (std)")(Catch::Benchmark::Groupometer meter)
 		{
 #if defined(_MSC_VER)
 			ScopedConsoleOutputCP console_ouput_utf8(65001); // utf8
@@ -442,9 +396,69 @@ TEST_CASE("write_stdout_utf8", "[.][dump]")
 			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
 			buffer_utf8.push_back(char{'\n'});
 
-			meter.measure([&](int n)
+			meter.measure([&](int)
 			{
-				return fio::write_stdout(buffer_utf8.data(), buffer_utf8.size(), n == meter.runs() - 1);
+				auto & stream = std::cout;
+				stream.write(buffer_utf8.data(), buffer_utf8.size());
+				stream.flush();
+			});
+		};
+
+		BENCHMARK_GROUP("cout - flush (std)")(Catch::Benchmark::Groupometer meter)
+		{
+#if defined(_MSC_VER)
+			ScopedConsoleOutputCP console_ouput_utf8(65001); // utf8
+
+			REQUIRE(fio::set_stdout_console());
+#endif
+
+			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
+			buffer_utf8.push_back(char{'\n'});
+
+			auto & stream = std::cout;
+
+			meter.measure([&](int)
+			{
+				stream.write(buffer_utf8.data(), buffer_utf8.size());
+			});
+
+			stream.flush();
+		};
+
+		BENCHMARK_GROUP("stdostream + flush")(Catch::Benchmark::Groupometer meter)
+		{
+#if defined(_MSC_VER)
+			ScopedConsoleOutputCP console_ouput_utf8(65001); // utf8
+
+			REQUIRE(fio::set_stdout_console());
+#endif
+
+			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
+			buffer_utf8.push_back(char{'\n'});
+
+			meter.measure([&](int)
+			{
+				auto stream = fio::stdostream<MyBuffer>();
+				stream << buffer_utf8;
+			});
+		};
+
+		BENCHMARK_GROUP("stdostream - flush")(Catch::Benchmark::Groupometer meter)
+		{
+#if defined(_MSC_VER)
+			ScopedConsoleOutputCP console_ouput_utf8(65001); // utf8
+
+			REQUIRE(fio::set_stdout_console());
+#endif
+
+			std::vector<char> buffer_utf8 = random_buffer_utf8(meter.size(), static_cast<unsigned int>(meter.group()));
+			buffer_utf8.push_back(char{'\n'});
+
+			auto stream = fio::stdostream<MyBuffer>();
+
+			meter.measure([&](int)
+			{
+				stream << buffer_utf8;
 			});
 		};
 	}

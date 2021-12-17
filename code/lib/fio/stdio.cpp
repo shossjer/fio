@@ -12,8 +12,6 @@ namespace fio
 
 #endif
 
-	fio_thread write_buffer buffer_stdout;
-
 #if defined(_MSC_VER)
 
 	bool set_stdout(HANDLE handle)
