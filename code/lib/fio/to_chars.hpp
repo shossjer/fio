@@ -13,6 +13,26 @@
 
 namespace fio
 {
+#if defined(_M_X64) || defined(_M_AMD64)
+	fio_inline unsigned long long mulhi(unsigned long long a, unsigned long long b)
+	{
+		return __umulh(a, b);
+	}
+#elif __SIZEOF_INT128__ == 16
+	fio_inline unsigned long long mulhi(unsigned long long a, unsigned long long b)
+	{
+		// apparently this is the best way to get the high part :shrug: kind
+		// of silly not to have an intrinsic for it
+		//
+		// https://stackoverflow.com/a/50958815
+		const unsigned __int128 prod = a * static_cast<unsigned __int128>(b);
+		return prod >> 64;
+	}
+#endif
+}
+
+namespace fio
+{
 	namespace detail
 	{
 		fio_target("ssse3") fio_inline void integer_digits(__m128i y4321x4321, __m128i & digit1, __m128i & digit10, __m128i & digit100, __m128i & digit1000)
@@ -639,9 +659,9 @@ namespace fio
 					// shamelessly stolen from clangs output)
 
 					// val = a bcd efg hij klm nop
-					const unsigned long long tx1 = (val * 0x232F33025BD42233) >> 37; // val / 1000000000000 = a bcd
-					const unsigned long long tx2 = (val * 0xABCC77118461CEFD) >> 26; // val / 100000000 = ab cde fgh
-					const unsigned long long tx3 = (val * 0x346DC5D63886594B) >> 11; // val / 10000 = abc def ghi jkl
+					const unsigned long long tx1 = mulhi(val, 0x232F33025BD42233) >> 37; // val / 1000000000000 = a bcd
+					const unsigned long long tx2 = mulhi(val, 0xABCC77118461CEFD) >> 26; // val / 100000000 = ab cde fgh
+					const unsigned long long tx3 = mulhi(val, 0x346DC5D63886594B) >> 11; // val / 10000 = abc def ghi jkl
 					x1 = tx1;
 					x2 = tx2 - tx1 * 10000;
 					x3 = tx3 - tx2 * 10000;
@@ -654,30 +674,47 @@ namespace fio
 			case 54:
 			case 55:
 			digits_17: // 17 digits
-				val *= 1000;
+				val *= 100;
 				digits = 17;
-				goto setup_5;
+				goto setup_5x;
 			case 56:
 				if (val < 100000000000000000u) goto digits_17; fio_fallthrough;
 			case 57:
 			case 58:
 			digits_18: // 18 digits
-				val *= 100;
+				val *= 10;
 				digits = 18;
-				goto setup_5;
+				goto setup_5x;
 			case 59:
 				if (val < 1000000000000000000u) goto digits_18; fio_fallthrough;
 			case 60:
 			case 61:
 			case 62:
 			digits_19: // 19 digits
-				val *= 10;
 				digits = 19;
-				goto setup_5;
+			setup_5x:
+				{
+					// note msvc does not generate magic numbers for division constants
+					// larger than 32 bits, in case other compilers also have problems we
+					// replace all divisions by these magical numbers (that was
+					// shamelessly stolen from clangs output)
+
+					// todo
+					// val = ab cde fgh ijk lmn opq rs
+					const unsigned long long tx1 = val / 1000000000000000ull; // val / 1000000000000000 = a bcd
+					const unsigned long long tx2 = mulhi(val, 0xAFEBFF0BCB24AAFF) >> 36; // val / 100000000000 = ab cde fgh
+					const unsigned long long tx3 = mulhi(val, 0xD6BF94D5E57A42BD) >> 23; // val / 10000000 = abc def ghi jkl
+					const unsigned long long tx4 = val / 1000ull; // val / 1000 = a bcd efg hij klm nop
+					x1 = tx1;
+					x2 = tx2 - tx1 * 10000;
+					x3 = tx3 - tx2 * 10000;
+					x4 = tx4 - tx3 * 10000;
+					y1 = (val - tx4 * 1000) * 10;
+				}
+				break;
 			case 63:
 				if (val < 10000000000000000000u) goto digits_19;
 				digits = 20;
-			setup_5:
 				{
 					// note msvc does not generate magic numbers for division constants
 					// larger than 32 bits, in case other compilers also have problems we
@@ -685,10 +722,10 @@ namespace fio
 					// shamelessly stolen from clangs output)
 
 					// val = ab cde fgh ijk lmn opq rst
-					const unsigned long long tx1 = (val * 0x39A5652FB1137857) >> 51; // val / 10000000000000000 = a bcd
-					const unsigned long long tx2 = (val * 0x232F33025BD42233) >> 37; // val / 1000000000000 = ab cde fgh
-					const unsigned long long tx3 = (val * 0xABCC77118461CEFD) >> 26; // val / 100000000 = abc def ghi jkl
-					const unsigned long long tx4 = (val * 0x346DC5D63886594B) >> 11; // val / 10000 = a bcd efg hij klm nop
+					const unsigned long long tx1 = mulhi(val, 0x39A5652FB1137857) >> 51; // val / 10000000000000000 = a bcd
+					const unsigned long long tx2 = mulhi(val, 0x232F33025BD42233) >> 37; // val / 1000000000000 = ab cde fgh
+					const unsigned long long tx3 = mulhi(val, 0xABCC77118461CEFD) >> 26; // val / 100000000 = abc def ghi jkl
+					const unsigned long long tx4 = mulhi(val, 0x346DC5D63886594B) >> 11; // val / 10000 = a bcd efg hij klm nop
 					x1 = tx1;
 					x2 = tx2 - tx1 * 10000;
 					x3 = tx3 - tx2 * 10000;
