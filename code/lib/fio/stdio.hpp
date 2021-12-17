@@ -81,6 +81,23 @@ namespace fio
 		static stdostream & is_actually_arithmetic(const double *);
 		static stdostream & is_actually_arithmetic(const long double *);
 
+		static stdostream & is_actually_character(const char *);
+		static stdostream & is_actually_character(const char16_t *);
+		static stdostream & is_actually_character(const char32_t *);
+#if defined(_MSC_VER)
+		static stdostream & is_actually_character(const wchar_t *);
+#endif
+		static stdostream & is_actually_character(const signed char *);
+		static stdostream & is_actually_character(const short *);
+		static stdostream & is_actually_character(const int *);
+		static stdostream & is_actually_character(const long *);
+		static stdostream & is_actually_character(const long long *);
+		static stdostream & is_actually_character(const unsigned char *);
+		static stdostream & is_actually_character(const unsigned short *);
+		static stdostream & is_actually_character(const unsigned int *);
+		static stdostream & is_actually_character(const unsigned long *);
+		static stdostream & is_actually_character(const unsigned long long *);
+
 		template <typename T>
 		static stdostream & is_actually_pointer(T *); // note hack
 
@@ -164,7 +181,7 @@ namespace fio
 
 		template <typename T>
 		fio_inline auto operator << (T x)
-			-> decltype(append(buffer_, &x + 0, &x + 1), this_ref())
+			-> decltype(append(buffer_, &x + 0, &x + 1), is_actually_character(&x))
 		{
 			append(buffer_, &x + 0, &x + 1);
 
@@ -182,7 +199,7 @@ namespace fio
 
 		template <typename T>
 		fio_inline auto operator << (const T & x)
-			-> decltype(to_chars(x, nullptr), is_actually_arithmetic(&x))
+			-> decltype(to_chars(x, data(buffer_)), is_actually_arithmetic(&x))
 		{
 			if (reserve(buffer_, size(buffer_) + 32)) // todo 32 for 64bit numbers, else 16
 			{
