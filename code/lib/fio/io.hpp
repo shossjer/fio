@@ -1,7 +1,7 @@
 #pragma once
 
-#include "fio/mem.hpp"
-#include "fio/to_chars.hpp"
+#include "fio/compiler.hpp"
+#include "fio/stdint.hpp"
 
 #if defined(_MSC_VER)
 # include <windows.h>
