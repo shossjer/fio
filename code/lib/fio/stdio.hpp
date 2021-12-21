@@ -2,6 +2,7 @@
 
 #include "fio/io.hpp"
 
+#include "fio/from_chars.hpp"
 #include "fio/to_chars.hpp"
 
 namespace fio
@@ -48,6 +49,141 @@ namespace fio
 	}
 
 #endif
+
+	template <typename Buffer>
+	class istream
+	{
+	public:
+
+		using char_type = typename Buffer::value_type;
+
+		using iostate = ssize;
+		static constexpr iostate goodbit = 0;
+		static constexpr iostate badbit = static_cast<ssize>(~(usize(-1) >> 1) | ~(usize(-1) >> 1) >> 1);
+		static constexpr iostate failbit = static_cast<ssize>(~(usize(-1) >> 1) | ~(usize(-1) >> 1) >> 2);
+		static constexpr iostate eofbit = static_cast<ssize>(~(usize(-1) >> 1) | ~(usize(-1) >> 1) >> 3);
+
+	private:
+
+		using pointer_type = char_type *;
+
+		template <typename P>
+		static P && declval();
+
+		template <typename P>
+		static void is_not_type(int, const P &);
+		template <typename P, typename ...Ps>
+		static int is_not_type(float, Ps && ...);
+
+		static int is_arithmetic(const signed char *);
+		static int is_arithmetic(const unsigned char *);
+		static int is_arithmetic(const short *);
+		static int is_arithmetic(const unsigned short *);
+		static int is_arithmetic(const int *);
+		static int is_arithmetic(const unsigned int *);
+		static int is_arithmetic(const long *);
+		static int is_arithmetic(const unsigned long *);
+		static int is_arithmetic(const long long *);
+		static int is_arithmetic(const unsigned long long *);
+		template <typename P>
+		static auto is_arithmetic(int, const P & x) -> decltype(is_arithmetic(&x));
+
+	private:
+
+		iostate state_;
+		Buffer buffer_;
+
+	public:
+
+		fio_inline istream()
+			: state_(0)
+		{}
+
+		template <typename ...Ps,
+		          decltype(is_not_type<istream>(0, declval<Ps &&>()...)) = 0>
+		fio_inline explicit istream(Ps && ...ps)
+			: state_(0)
+			, buffer_(static_cast<Ps &&>(ps)...)
+		{}
+
+	public:
+
+		fio_inline explicit operator bool() const { return state_ >= 0; }
+
+		fio_inline Buffer & buffer() { return buffer_; }
+		fio_inline const Buffer & buffer() const { return buffer_; }
+
+		fio_inline void clear(iostate state = goodbit)
+		{
+			state_ = state;
+		}
+
+		fio_inline void setstate(iostate state)
+		{
+			state_ |= state;
+		}
+
+		fio_inline istream & operator >> (bool & x)
+		{
+			if (!empty(buffer_))
+			{
+				const usize value = *data(buffer_) - '0';
+				if (value < 2)
+				{
+					x = value != 0;
+
+					buffer_ = from(buffer_, data(buffer_) + 1);
+				}
+				else
+				{
+					// note nothing is written to x
+					state_ |= failbit;
+				}
+			}
+			else
+			{
+				// note nothing is written to x
+				state_ |= failbit | eofbit;
+			}
+
+			return *this;
+		}
+
+		fio_inline istream & operator >> (char_type & x)
+		{
+			if (!empty(buffer_))
+			{
+				x = *data(buffer_);
+
+				buffer_ = from(buffer_, data(buffer_) + 1);
+			}
+			else
+			{
+				// note nothing is written to x
+				state_ |= failbit | eofbit;
+			}
+
+			return *this;
+		}
+
+		template <typename T>
+		fio_inline auto operator >> (T & x)
+			-> decltype(is_arithmetic(0, x), declval<istream &>())
+		{
+			const char_type * const rest = from_chars(data(buffer_), data(buffer_) + size(buffer_), x);
+			if (rest != data(buffer_))
+			{
+				buffer_ = from(buffer_, rest);
+			}
+			else
+			{
+				// note nothing is written to x
+				state_ |= failbit;
+			}
+
+			return *this;
+		}
+	};
 
 	namespace detail
 	{
