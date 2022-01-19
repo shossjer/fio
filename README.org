@@ -57,3 +57,14 @@
      ./build/fiobnc --benchmark-samples 1000 "to_chars sint64"
      octave --path ./plot --eval "plot_dump('plot/to_chars_sint64.dump');"
      #+end_src
+
+**** from_chars float32
+
+     *MSVC-19.27.29112.0*
+     [[file:plot/from_chars_float32_msvc_19.27.29112.0.png]]
+
+     Generate the plot yourself by running something like
+     #+begin_src
+     ./build/fiobnc "from_chars float32"
+     octave --path ./plot --eval "plot_dump('plot/from_chars_float32.dump');"
+     #+end_src
