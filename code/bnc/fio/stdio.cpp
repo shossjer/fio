@@ -361,23 +361,9 @@ namespace
 	char * data(MyBuffer & x) { return x.chars_.data(); }
 	size_t size(MyBuffer & x) { return x.chars_.size(); }
 
-	void clear(MyBuffer & x)
-	{
-		x.chars_.clear();
-	}
-
-	void append_impl(MyBuffer & x, const char * begin, const char * end)
+	void append(MyBuffer & x, const char * begin, const char * end)
 	{
 		x.chars_.insert(x.chars_.end(), begin, end);
-	}
-
-	using fio::to_address;
-
-	template <typename Begin, typename End>
-	auto append(MyBuffer & x, Begin begin, End end)
-		-> decltype(append_impl(x, to_address(begin), to_address(end)), void())
-	{
-		append_impl(x, to_address(begin), to_address(end));
 	}
 }
 
@@ -399,7 +385,7 @@ TEST_CASE("cout chars", "[.][dump]")
 			meter.measure([&](int)
 			{
 				auto & stream = std::cout;
-				stream.write(buffer_utf8.data(), buffer_utf8.size());
+				stream.write(buffer_utf8.data(), static_cast<fio::ssize>(buffer_utf8.size()));
 				stream.flush();
 			});
 		};
@@ -419,7 +405,7 @@ TEST_CASE("cout chars", "[.][dump]")
 
 			meter.measure([&](int)
 			{
-				stream.write(buffer_utf8.data(), buffer_utf8.size());
+				stream.write(buffer_utf8.data(), static_cast<fio::ssize>(buffer_utf8.size()));
 			});
 
 			stream.flush();
@@ -439,7 +425,7 @@ TEST_CASE("cout chars", "[.][dump]")
 			meter.measure([&](int)
 			{
 				auto stream = fio::stdostream<MyBuffer>();
-				stream << buffer_utf8;
+				stream.write(buffer_utf8.data(), buffer_utf8.size());
 			});
 		};
 
@@ -458,7 +444,7 @@ TEST_CASE("cout chars", "[.][dump]")
 
 			meter.measure([&](int)
 			{
-				stream << buffer_utf8;
+				stream.write(buffer_utf8.data(), buffer_utf8.size());
 			});
 		};
 	}

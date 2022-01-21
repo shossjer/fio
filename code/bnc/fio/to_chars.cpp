@@ -215,11 +215,11 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 			char buffer[1 + 16];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned int n)
 			{
 				static_assert(sizeof(int) == sizeof(fio::sint32), "");
 
-				const int val = num + (n & (num - 1));
+				const int val = static_cast<int>(num + (n & (num - 1)));
 				return std::sprintf(buffer + 0, "%d", val);
 			});
 		};
@@ -231,9 +231,9 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 			char buffer[1 + 16];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned int n)
 			{
-				const fio::sint32 val = num + (n & (num - 1));
+				const fio::sint32 val = static_cast<fio::sint32>(num + (n & (num - 1)));
 				return std::to_chars(buffer, buffer + 16, val);
 			});
 		};
@@ -246,9 +246,9 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 			char buffer[1 + 16];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned int n)
 			{
-				const fio::sint32 val = num + (n & (num - 1));
+				const fio::sint32 val = static_cast<fio::sint32>(num + (n & (num - 1)));
 				return ::_itoa(val, buffer + 0, 10);
 			});
 		};
@@ -261,9 +261,9 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 			char buffer[1 + 16];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned int n)
 			{
-				const fio::sint32 val = num + (n & (num - 1));
+				const fio::sint32 val = static_cast<fio::sint32>(num + (n & (num - 1)));
 				return EA::StdC::Sprintf(buffer + 0, "%I32d", val);
 			});
 		};
@@ -276,9 +276,9 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 			char buffer[1 + 16];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned int n)
 			{
-				const fio::sint32 val = num + (n & (num - 1));
+				const fio::sint32 val = static_cast<fio::sint32>(num + (n & (num - 1)));
 				return fmt::format_to(buffer + 0, "{}", val);
 			});
 		};
@@ -290,9 +290,9 @@ TEST_CASE("to_chars sint32", "[.][dump]")
 
 			char buffer[1 + 16];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned int n)
 			{
-				const fio::sint32 val = num + (n & (num - 1));
+				const fio::sint32 val = static_cast<fio::sint32>(num + (n & (num - 1)));
 				return fio::to_chars(val, buffer + 0);
 			});
 		};
@@ -309,11 +309,11 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 
 			char buffer[1 + 32];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned long long n)
 			{
 				static_assert(sizeof(long long) == sizeof(fio::sint64), "");
 
-				const long long val = num + (n & (num - 1));
+				const long long val = static_cast<long long>(num + (n & (num - 1)));
 				return std::sprintf(buffer + 0, "%lld", val);
 			});
 		};
@@ -325,9 +325,9 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 
 			char buffer[1 + 32];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned long long n)
 			{
-				const fio::sint64 val = num + (n & (num - 1));
+				const fio::sint64 val = static_cast<fio::sint64>(num + (n & (num - 1)));
 				return std::to_chars(buffer, buffer + 16, val);
 			});
 		};
@@ -340,9 +340,9 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 
 			char buffer[1 + 32];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned long long n)
 			{
-				const fio::sint64 val = num + (n & (num - 1));
+				const fio::sint64 val = static_cast<fio::sint64>(num + (n & (num - 1)));
 				return ::_i64toa(val, buffer + 0, 10);
 			});
 		};
@@ -355,9 +355,9 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 
 			char buffer[1 + 32];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned long long n)
 			{
-				const fio::sint64 val = num + (n & (num - 1));
+				const fio::sint64 val = static_cast<fio::sint64>(num + (n & (num - 1)));
 				return EA::StdC::Sprintf(buffer + 0, "%I64d", val);
 			});
 		};
@@ -370,9 +370,9 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 
 			char buffer[1 + 32];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned long long n)
 			{
-				const fio::sint64 val = num + (n & (num - 1));
+				const fio::sint64 val = static_cast<fio::sint64>(num + (n & (num - 1)));
 				return fmt::format_to(buffer + 0, "{}", val);
 			});
 		};
@@ -384,9 +384,9 @@ TEST_CASE("to_chars sint64", "[.][dump]")
 
 			char buffer[1 + 32];
 
-			meter.measure([&](int n)
+			meter.measure([&](unsigned long long n)
 			{
-				const fio::sint64 val = num + (n & (num - 1));
+				const fio::sint64 val = static_cast<fio::sint64>(num + (n & (num - 1)));
 				return fio::to_chars(val, buffer + 0);
 			});
 		};
