@@ -3,7 +3,6 @@
 #include "catchhacks.hpp"
 
 #include "fio/from_chars.hpp"
-#include "fio/mem.hpp"
 
 #include <cstdio>
 #if (__cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
@@ -621,892 +620,245 @@ TEST_CASE("from_chars uint64", "[.][dump]")
 	}
 }
 
-namespace
+TEST_CASE("from_chars float32 in-betweens", "[.][dump]")
 {
-	namespace detail
+	char buffer[255][200];
+	for (unsigned int magnitude = 0b00000000; magnitude < 0b11111111; magnitude++)
 	{
-		fio_target("sse4.1")
-		void extract_integer_8(const char * end, fio::uint32 & val)
+		const unsigned int value = magnitude << 23;
+		const unsigned int next = value + 1;
+		const float value_as_float = fio::bit_cast<float>(value);
+		const float next_as_float = fio::bit_cast<float>(next);
+		const double middle = static_cast<double>(value_as_float) * .5 + static_cast<double>(next_as_float) * .5;
+		const int length = std::snprintf(buffer[magnitude] + 1, 200 - 1, "%.150f", middle);
+		REQUIRE(length > 0);
+		REQUIRE(length < 200);
+
+		buffer[magnitude][0] = 0; // paranoid
+
+		int size = length;
+		if (buffer[magnitude][size] == '0')
 		{
-			const __m128i line = _mm_loadu_si64(end - 8);
-
-			const __m128i digits = _mm_sub_epi8(line, _mm_set1_epi8('0'));
-
-			const __m128i digits_abcd = _mm_shuffle_epi8(digits, _mm_set_epi8(-1, -1, -1, 3, -1, -1, -1, 2, -1, -1, -1, 1, -1, -1, -1, 0));
-			const __m128i digits_efgh = _mm_shuffle_epi8(digits, _mm_set_epi8(-1, -1, -1, 7, -1, -1, -1, 6, -1, -1, -1, 5, -1, -1, -1, 4));
-
-			// todo can it be done faster?
-			const __m128i digits_abcd_mul = _mm_mullo_epi32(digits_abcd, _mm_set_epi32(10000, 100000, 1000000, 10000000));
-			const __m128i digits_efgh_mul = _mm_mullo_epi32(digits_efgh, _mm_set_epi32(1, 10, 100, 1000));
-
-			const __m128i digits_add1 = _mm_add_epi32(digits_abcd_mul, digits_efgh_mul);
-			const __m128i digits_add2 = _mm_add_epi32(digits_add1, _mm_srli_si128(digits_add1, 8));
-			const __m128i digits_add3 = _mm_add_epi32(digits_add2, _mm_srli_si128(digits_add2, 4));
-
-			val = _mm_cvtsi128_si32(digits_add3);
-		}
-
-		fio_target("ssse3")
-		void extract_integer_16(const char * end, fio::uint64 & val)
-		{
-			const __m128i line = _mm_loadu_si128(reinterpret_cast<const __m128i *>(end - 16));
-
-			const __m128i digits = _mm_sub_epi8(line, _mm_set1_epi8('0'));
-
-			// _mm_maddubs_epi16 // ssse3
-			//       arg a  p| o| n| m| l| k| j| i| h| g| f| e| d| c| b| a
-			//       arg b  1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10
-			// (8 16-bits)    op|   mn|   kl|   ij|   gh|   ef|   cd|   ab
-			const __m128i pair = _mm_maddubs_epi16(digits, _mm_set1_epi16(0x010a));
-			// _mm_madd_epi16
-			//       arg a    op|   mn|   kl|   ij|   gh|   ef|   cd|   ab
-			//       arg b     1|  100|    1|  100|    1|  100|    1|  100
-			// (4 32-bits)        mnop|       ijkl|       efgh|       abcd
-			const __m128i quad = _mm_madd_epi16(pair, _mm_set1_epi32(0x00010064));
-
-			// _mm_mul_epu32
-			//       arg a        mnop|       ijkl|       efgh|       abcd
-			//       arg b            |      10000|           |  244140625 // 5**12
-			// (2 64-bits)                ijkl0000|                  abcd*
-			const __m128i digits_abcdijkl = _mm_mul_epu32(quad, _mm_set_epi32(0, 10000, 0, 244140625));
-
-			const __m128i digits_abcd = _mm_slli_epi64(digits_abcdijkl, 12);
-			const __m128i digits_ijkl = _mm_srli_si128(digits_abcdijkl, 8);
-
-			// _mm_srli_epi64 imm8=32
-			//       arg a        mnop|       ijkl|       efgh|       abcd
-			// _mm_mul_epu32
-			//       arg b            |          0|           |  100000000
-			// (2 64-bits)                       0|           efgh00000000
-			const __m128i digits_efgh = _mm_mul_epu32(_mm_srli_epi64(quad, 32), _mm_set_epi32(0, 0, 0, 100000000));
-
-			const __m128i digits_mnop = _mm_srli_si128(quad, 12);
-
-			// _mm_add_epi32
-			//       arg a                       0|                   mnop
-			//       arg b                       0|               ijkl0000
-			// _mm_add_epi32
-			//       arg b                       0|           efgh00000000
-			// _mm_add_epi32
-			//       arg b                        |       abcd000000000000
-			// (2 64-bits)                        |       abcdefghijklmnop
-			const __m128i sum = _mm_add_epi64(_mm_add_epi64(_mm_add_epi64(digits_mnop, digits_ijkl), digits_efgh), digits_abcd);
-
-			val = _mm_cvtsi128_si64x(sum);
-		}
-
-		fio_target("ssse3")
-		void extract_integer_32(const char * end, fio::uint64 & valhi, fio::uint64 & vallo)
-		{
-			const __m128i line1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(end - 32));
-			const __m128i line2 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(end - 16));
-
-			const __m128i digits1 = _mm_sub_epi8(line1, _mm_set1_epi8('0'));
-			const __m128i digits2 = _mm_sub_epi8(line2, _mm_set1_epi8('0'));
-
-			// _mm_maddubs_epi16 // ssse3
-			//       arg a  p| o| n| m| l| k| j| i| h| g| f| e| d| c| b| a
-			//       arg b  1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10
-			// (8 16-bits)    op|   mn|   kl|   ij|   gh|   ef|   cd|   ab
-			const __m128i digits11 = _mm_maddubs_epi16(digits1, _mm_set1_epi16(0x010a));
-			// _mm_madd_epi16
-			//       arg a    op|   mn|   kl|   ij|   gh|   ef|   cd|   ab
-			//       arg b     1|  100|    1|  100|    1|  100|    1|  100
-			// (4 32-bits)        mnop|       ijkl|       efgh|       abcd
-			const __m128i digits1111 = _mm_madd_epi16(digits11, _mm_set1_epi32(0x00010064));
-
-			// _mm_maddubs_epi16 // ssse3
-			//       arg a  F| E| D| C| B| A| z| y| x| w| v| u| t| s| r| q
-			//       arg b  1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10
-			// (8 16-bits)    EF|   CD|   AB|   yz|   wx|   uv|   st|   qr
-			const __m128i digits22 = _mm_maddubs_epi16(digits2, _mm_set1_epi16(0x010a));
-			// _mm_madd_epi16
-			//       arg a    EF|   CD|   AB|   yz|   wx|   uv|   st|   qr
-			//       arg b     1|  100|    1|  100|    1|  100|    1|  100
-			// (4 32-bits)        CDEF|       yzAB|       uvwx|       qrst
-			const __m128i digits2222 = _mm_madd_epi16(digits22, _mm_set1_epi32(0x00010064));
-
-			// _mm_unpacklo_epi64
-			//       arg a        mnop|       ijkl|       efgh|       abcd
-			//       arg b        CDEF|       yzAB|       uvwx|       qrst
-			// (4 32-bits)        uvwx|       qrst|       efgh|       abcd
-			const __m128i unpacklo = _mm_unpacklo_epi64(digits1111, digits2222);
-			// _mm_unpackhi_epi64
-			//       arg a        mnop|       ijkl|       efgh|       abcd
-			//       arg b        CDEF|       yzAB|       uvwx|       qrst
-			// (4 32-bits)        CDEF|       yzAB|       mnop|       ijkl
-			const __m128i unpackhi = _mm_unpackhi_epi64(digits1111, digits2222);
-
-			// _mm_mul_epu32
-			//       arg a        uvwx|       qrst|       efgh|       abcd
-			//       arg b            |  244140625|           |  244140625 // 5**12
-			// _mm_slli_epi64 imm8=12
-			// (2 64-bits)        qrst000000000000|       abcd000000000000
-			const __m128i digits_1000000000000 = _mm_slli_epi64(_mm_mul_epu32(unpacklo, _mm_set_epi32(0, 244140625, 0, 244140625)), 12);
-
-			// _mm_srli_epi64 imm8=32
-			//       arg a        uvwx|       qrst|       efgh|       abcd
-			// _mm_mul_epu32
-			//       arg b            |  100000000|           |  100000000
-			// (2 64-bits)            uvwx00000000|           efgh00000000
-			const __m128i digits_100000000 = _mm_mul_epu32(_mm_srli_epi64(unpacklo, 32), _mm_set_epi32(0, 100000000, 0, 100000000));
-
-			// _mm_mul_epu32
-			//       arg a        CDEF|       yzAB|       mnop|       ijkl
-			//       arg b            |      10000|           |      10000
-			// (2 64-bits)                yzAB0000|               ijkl0000
-			const __m128i digits_10000 = _mm_mul_epu32(unpackhi, _mm_set_epi32(0, 10000, 0, 10000));
-
-			// _mm_srli_epi64 imm8=32
-			//       arg a        CDEF|       yzAB|       mnop|       ijkl
-			// (2 64-bits)                    CDEF|                   mnop
-			const __m128i digits_1 = _mm_srli_epi64(unpackhi, 32);
-
-			// _mm_add_epi32
-			//       arg a                    CDEF|                   mnop
-			//       arg b                yzAB0000|               ijkl0000
-			// _mm_add_epi32
-			//       arg b            uvwx00000000|           efgh00000000
-			// _mm_add_epi32
-			//       arg b        qrst000000000000|       abcd000000000000
-			// (2 64-bits)        qrstuvwxyzABCDEF|       abcdefghijklmnop
-			const __m128i sum = _mm_add_epi64(_mm_add_epi64(_mm_add_epi64(digits_1, digits_10000), digits_100000000), digits_1000000000000);
-
-			valhi = _mm_cvtsi128_si64x(sum);
-			vallo = _mm_cvtsi128_si64x(_mm_srli_si128(sum, 8));
-		}
-
-		fio_target("ssse3")
-		void extract_integer_40(const char * end, fio::uint64 & valhi, fio::uint32 & valmi, fio::uint64 & vallo)
-		{
-			extract_integer_8(end - 16, valmi);
-
-			const __m128i line1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(end - 40));
-			const __m128i line2 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(end - 16));
-
-			const __m128i digits1 = _mm_sub_epi8(line1, _mm_set1_epi8('0'));
-			const __m128i digits2 = _mm_sub_epi8(line2, _mm_set1_epi8('0'));
-
-			// _mm_maddubs_epi16 // ssse3
-			//       arg a  p| o| n| m| l| k| j| i| h| g| f| e| d| c| b| a
-			//       arg b  1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10
-			// (8 16-bits)    op|   mn|   kl|   ij|   gh|   ef|   cd|   ab
-			const __m128i digits11 = _mm_maddubs_epi16(digits1, _mm_set1_epi16(0x010a));
-			// _mm_madd_epi16
-			//       arg a    op|   mn|   kl|   ij|   gh|   ef|   cd|   ab
-			//       arg b     1|  100|    1|  100|    1|  100|    1|  100
-			// (4 32-bits)        mnop|       ijkl|       efgh|       abcd
-			const __m128i digits1111 = _mm_madd_epi16(digits11, _mm_set1_epi32(0x00010064));
-
-			// _mm_maddubs_epi16 // ssse3
-			//       arg a  F| E| D| C| B| A| z| y| x| w| v| u| t| s| r| q
-			//       arg b  1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10| 1|10
-			// (8 16-bits)    EF|   CD|   AB|   yz|   wx|   uv|   st|   qr
-			const __m128i digits22 = _mm_maddubs_epi16(digits2, _mm_set1_epi16(0x010a));
-			// _mm_madd_epi16
-			//       arg a    EF|   CD|   AB|   yz|   wx|   uv|   st|   qr
-			//       arg b     1|  100|    1|  100|    1|  100|    1|  100
-			// (4 32-bits)        CDEF|       yzAB|       uvwx|       qrst
-			const __m128i digits2222 = _mm_madd_epi16(digits22, _mm_set1_epi32(0x00010064));
-
-			// _mm_unpacklo_epi64
-			//       arg a        mnop|       ijkl|       efgh|       abcd
-			//       arg b        CDEF|       yzAB|       uvwx|       qrst
-			// (4 32-bits)        uvwx|       qrst|       efgh|       abcd
-			const __m128i unpacklo = _mm_unpacklo_epi64(digits1111, digits2222);
-			// _mm_unpackhi_epi64
-			//       arg a        mnop|       ijkl|       efgh|       abcd
-			//       arg b        CDEF|       yzAB|       uvwx|       qrst
-			// (4 32-bits)        CDEF|       yzAB|       mnop|       ijkl
-			const __m128i unpackhi = _mm_unpackhi_epi64(digits1111, digits2222);
-
-			// _mm_mul_epu32
-			//       arg a        uvwx|       qrst|       efgh|       abcd
-			//       arg b            |  244140625|           |  244140625 // 5**12
-			// _mm_slli_epi64 imm8=12
-			// (2 64-bits)        qrst000000000000|       abcd000000000000
-			const __m128i digits_1000000000000 = _mm_slli_epi64(_mm_mul_epu32(unpacklo, _mm_set_epi32(0, 244140625, 0, 244140625)), 12);
-
-			// _mm_srli_epi64 imm8=32
-			//       arg a        uvwx|       qrst|       efgh|       abcd
-			// _mm_mul_epu32
-			//       arg b            |  100000000|           |  100000000
-			// (2 64-bits)            uvwx00000000|           efgh00000000
-			const __m128i digits_100000000 = _mm_mul_epu32(_mm_srli_epi64(unpacklo, 32), _mm_set_epi32(0, 100000000, 0, 100000000));
-
-			// _mm_mul_epu32
-			//       arg a        CDEF|       yzAB|       mnop|       ijkl
-			//       arg b            |      10000|           |      10000
-			// (2 64-bits)                yzAB0000|               ijkl0000
-			const __m128i digits_10000 = _mm_mul_epu32(unpackhi, _mm_set_epi32(0, 10000, 0, 10000));
-
-			// _mm_srli_epi64 imm8=32
-			//       arg a        CDEF|       yzAB|       mnop|       ijkl
-			// (2 64-bits)                    CDEF|                   mnop
-			const __m128i digits_1 = _mm_srli_epi64(unpackhi, 32);
-
-			// _mm_add_epi32
-			//       arg a                    CDEF|                   mnop
-			//       arg b                yzAB0000|               ijkl0000
-			// _mm_add_epi32
-			//       arg b            uvwx00000000|           efgh00000000
-			// _mm_add_epi32
-			//       arg b        qrst000000000000|       abcd000000000000
-			// (2 64-bits)        qrstuvwxyzABCDEF|       abcdefghijklmnop
-			const __m128i sum = _mm_add_epi64(_mm_add_epi64(_mm_add_epi64(digits_1, digits_10000), digits_100000000), digits_1000000000000);
-
-			valhi = _mm_cvtsi128_si64x(sum);
-			vallo = _mm_cvtsi128_si64x(_mm_srli_si128(sum, 8));
-		}
-
-		fio::uint32 extract_integer_bits_8(const char * first, fio::usize count)
-		{
-			fio::uint32 val;
-			extract_integer_8(first + count, val); // end, out
-
-			return val;
-		}
-
-		fio::uint32 extract_integer_bits_16(const char * first, fio::usize count)
-		{
-			fio::uint64 val;
-			extract_integer_16(first + count, val); // end, out
-
-			unsigned long index;
-			_BitScanReverse64(&index, val);
-
-			const unsigned int exp = 127 + index - 1; // the one is added back again as the 25th bit of the mantissa
-
-			const unsigned long long bits = (exp << 24) + (val >> (index - 24));
-
-			const unsigned long long rounded = bits + 1; // note may overflow into exponent
-			return static_cast<fio::uint32>(rounded >> 1);
-		}
-
-		fio::uint32 extract_integer_bits_32(const char * first, fio::usize count)
-		{
-			fio::uint64 valx;
-			fio::uint64 valy;
-			extract_integer_32(first + count, valy, valx); // end, out
-
-			unsigned long long yhi;
-			unsigned long long ylo = _umul128(valy, 10000000000000000, &yhi);
-
-			unsigned long long sumlo;
-			unsigned char carry = _addcarry_u64(0, ylo, valx, &sumlo);
-			unsigned long long sumhi;
-			carry = _addcarry_u64(carry, yhi, 0, &sumhi);
-
-			if (sumhi != 0)
+			do
 			{
-				unsigned long index; // at mmost 106-64=42
-				_BitScanReverse64(&index, sumhi);
-
-				const unsigned int exp = 191 + index;
-
-				const unsigned long long bits = __shiftleft128(__shiftright128(sumlo, sumhi, static_cast<unsigned char>(index)), exp, 24);
-
-				const unsigned long long rounded = bits + 1; // note may overflow into exponent
-				return static_cast<fio::uint32>(rounded >> 1);
+				size--;
 			}
-			else
-			{
-				unsigned long index;
-				_BitScanReverse64(&index, sumlo);
-
-				const unsigned int exp = 127 + index - 1; // the one is added back again as the 25th bit of the mantissa
-
-				const unsigned long long bits = (exp << 24) + (sumlo >> (index - 24));
-
-				const unsigned long long rounded = bits + 1; // note may overflow into exponent
-				return static_cast<fio::uint32>(rounded >> 1);
-			}
+			while (buffer[magnitude][size] == '0');
 		}
 
-		fio::uint32 extract_integer_bits_40(const char * first, fio::usize count)
-		{
-			fio::uint64 valx;
-			fio::uint32 valy;
-			fio::uint64 valz;
-			extract_integer_40(first + count, valz, valy, valx); // end, out
-
-			unsigned long long zhi;
-			unsigned long long zlo = _umul128(valz, 59604644775390625, &zhi); // 5**24
-			unsigned long long yhi;
-			unsigned long long ylo = _umul128(valy, 10000000000000000, &yhi);
-			unsigned long long xlo = valx;
-
-			if (zhi >= (1ull << (64 - 24)))
-				return fio::uint32(-1); // overflow
-
-			unsigned long long hihi = __shiftleft128(zlo, zhi, 24);
-			unsigned long long hilo = zlo << 24;
-			unsigned long long mihi = yhi;
-			unsigned long long milo = ylo;
-			unsigned long long lolo = xlo;
-
-			unsigned long long lo;
-			unsigned char carry = _addcarry_u64(0, lolo, milo, &lo);
-			unsigned long long hi;
-			carry = _addcarry_u64(carry, mihi, 0, &hi);
-			carry = _addcarry_u64(carry, lo, hilo, &lo); // note carry-in is guaranteed to be 0
-			carry = _addcarry_u64(carry, hi, hihi, &hi);
-			if (carry != 0)
-				return fio::uint32(-1); // overflow
-
-			unsigned long index; // at least 26
-			_BitScanReverse64(&index, hi);
-
-			const unsigned int exp = 191 + index - 1; // the one is added back again as the 25th bit of the mantissa
-
-			const unsigned long long bits = (exp << 24) + (hi >> (index - 24));
-
-			const unsigned long long rounded = bits + 1; // note may overflow into exponent
-			return static_cast<fio::uint32>(rounded >> 1);
-		}
-
-		fio::uint64 extract_decimal_bits_24(const char * first, fio::usize count)
-		{
-			fio_unused(count);
-
-			fio::uint64 valx;
-			fio::uint64 valy;
-			extract_integer_32(first + 24, valy, valx); // end, out, out
-
-			// 24: yyyyyyyyxxxxxxxxxxxxxxxx // (5**24)
-			// (yyyyyyyy * (10**16) + xxxxxxxxxxxxxxxx) // (5**24)
-			// (yyyyyyyy * (2**16) * (5**16) + xxxxxxxxxxxxxxxx) // (5**24)
-			// (yyyyyyyy * (2**16) + xxxxxxxxxxxxxxxx // (5**16)) // (5**8)
-			//  |43--------------|
-
-			const fio::uint64 x_div_16 = __umulh(valx, 0x39a5652fb1137857) >> 35; // 5**16
-			const fio::uint64 sum = (valy << 16) + x_div_16;
-			const fio::uint64 sum_div_8 = __umulh(sum, 0xabcc77118461cefd) >> 18; // 5**8
-			return sum_div_8 >> (24 - count);
-		}
-
-		fio_inline
-		void multiply_integer_2(fio::uint64 hi, fio::uint64 lo, const unsigned long long (& denominators)[3], unsigned long long (& results)[7])
-		{
-			//     x1x0
-			//     y1y0
-			//----------
-			//     x0y0
-			//   x1y0
-			//   x0y1
-			// x1y1
-			//----------
-			//   r2r1r0
-			// s2s1s0
-
-			unsigned long long x0y0hi;
-			unsigned long long x0y0lo = _umul128(lo, denominators[0], &x0y0hi);
-			unsigned long long x1y0hi;
-			unsigned long long x1y0lo = _umul128(hi, denominators[0], &x1y0hi);
-			unsigned long long x0y1hi;
-			unsigned long long x0y1lo = _umul128(lo, denominators[1], &x0y1hi);
-			unsigned long long x1y1hi;
-			unsigned long long x1y1lo = _umul128(hi, denominators[1], &x1y1hi);
-
-			unsigned char carry = 0;
-
-			unsigned long long r0 = x0y0lo;
-			unsigned long long r1;
-			carry = _addcarry_u64(carry, x0y0hi, x1y0lo, &r1);
-			unsigned long long r2;
-			carry = _addcarry_u64(carry, x1y0hi, 0, &r2);
-			if (!fio_expect(carry == 0))
-			{
-				carry = 0;
-			}
-
-			unsigned long long s0 = x0y1lo;
-			unsigned long long s1;
-			carry = _addcarry_u64(carry, x0y1hi, x1y1lo, &s1);
-			unsigned long long s2;
-			carry = _addcarry_u64(carry, x1y1hi, 0, &s2);
-			if (!fio_expect(carry == 0))
-			{
-				carry = 0;
-			}
-
-			results[0] = r0;
-			carry = _addcarry_u64(carry, r1, s0, results + 1);
-			carry = _addcarry_u64(carry, r2, s1, results + 2);
-			carry = _addcarry_u64(carry, 0, s2, results + 3);
-		}
-
-		fio_inline
-		void multiply_integer_3(fio::uint64 hi, fio::uint64 mi, fio::uint64 lo, const unsigned long long (& denominators)[3], unsigned long long (& results)[7])
-		{
-			//       x2x1x0
-			//       y2y1y0
-			//--------------
-			//         x0y0
-			//       x1y0
-			//     x2y0
-			//       x0y1
-			//     x1y1
-			//   x2y1
-			//     x0y2
-			//   x1y2
-			// x2y2
-			//--------------
-			//     r3r2r1r0
-			//   s3s2s1s0
-			// t3t2t1t0
-
-			////// t3 will always be zero... right?
-
-			unsigned long long x0y0hi;
-			unsigned long long x0y0lo = _umul128(lo, denominators[0], &x0y0hi);
-			unsigned long long x1y0hi;
-			unsigned long long x1y0lo = _umul128(mi, denominators[0], &x1y0hi);
-			unsigned long long x2y0hi;
-			unsigned long long x2y0lo = _umul128(hi, denominators[0], &x2y0hi);
-			unsigned long long x0y1hi;
-			unsigned long long x0y1lo = _umul128(lo, denominators[1], &x0y1hi);
-			unsigned long long x1y1hi;
-			unsigned long long x1y1lo = _umul128(mi, denominators[1], &x1y1hi);
-			unsigned long long x2y1hi;
-			unsigned long long x2y1lo = _umul128(hi, denominators[1], &x2y1hi);
-			unsigned long long x0y2hi;
-			unsigned long long x0y2lo = _umul128(lo, denominators[2], &x0y2hi);
-			unsigned long long x1y2hi;
-			unsigned long long x1y2lo = _umul128(mi, denominators[2], &x1y2hi);
-			unsigned long long x2y2hi;
-			unsigned long long x2y2lo = _umul128(hi, denominators[2], &x2y2hi);
-
-			unsigned char carry = 0;
-
-			unsigned long long r0 = x0y0lo;
-			unsigned long long r1;
-			carry = _addcarry_u64(carry, x0y0hi, x1y0lo, &r1);
-			unsigned long long r2;
-			carry = _addcarry_u64(carry, x1y0hi, x2y0lo, &r2);
-			unsigned long long r3;
-			carry = _addcarry_u64(carry, x2y0hi, 0, &r3);
-			if (!fio_expect(carry == 0))
-			{
-				carry = 0;
-			}
-
-			unsigned long long s0 = x0y1lo;
-			unsigned long long s1;
-			carry = _addcarry_u64(carry, x0y1hi, x1y1lo, &s1);
-			unsigned long long s2;
-			carry = _addcarry_u64(carry, x1y1hi, x2y1lo, &s2);
-			unsigned long long s3;
-			carry = _addcarry_u64(carry, x2y1hi, 0, &s3);
-			if (!fio_expect(carry == 0))
-			{
-				carry = 0;
-			}
-
-			unsigned long long t0 = x0y2lo;
-			unsigned long long t1;
-			carry = _addcarry_u64(carry, x0y2hi, x1y2lo, &t1);
-			unsigned long long t2;
-			carry = _addcarry_u64(carry, x1y2hi, x2y2lo, &t2);
-			unsigned long long t3;
-			carry = _addcarry_u64(carry, x2y2hi, 0, &t3);
-			if (!fio_expect(carry == 0))
-			{
-				carry = 0;
-			}
-
-			results[0] = r0;
-			carry = _addcarry_u64(carry, r1, s0, results + 1);
-			carry = _addcarry_u64(carry, r2, s1, results + 2);
-			carry = _addcarry_u64(carry, r3, s2, results + 3);
-			carry = _addcarry_u64(carry, 0, s3, results + 4);
-			//__assume(carry == 0); // since t3 must be zero this must hold??????????
-			if (!fio_expect(carry == 0))
-			{
-				carry = 0;
-			}
-			carry = _addcarry_u64(carry, results[2], t0, results + 2);
-			carry = _addcarry_u64(carry, results[3], t1, results + 3);
-			carry = _addcarry_u64(carry, results[4], t2, results + 4);
-			carry = _addcarry_u64(carry, 0, t3, results + 5);
-		}
-
-		fio::uint32 float_bits(const char * first, const char * dot, const char * last)
-		{
-			constexpr const int offset = 32;
-			alignas(16) char buffer[128];
-
-			const auto n_integers = dot - first;
-			if (n_integers > 0)
-			{
-				if (n_integers >= 40)
-				{
-					return 0; // todo
-				}
-				else if (n_integers > 32)
-				{
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 16), _mm_set1_epi8('0')); // todo 8 suffice
-
-					fio::memcpy(first, buffer + offset, n_integers);
-
-					return extract_integer_bits_40(buffer + offset, n_integers); // beg, n
-				}
-				else if (n_integers > 16)
-				{
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 16), _mm_set1_epi8('0'));
-
-					fio::memcpy(first, buffer + offset, n_integers);
-
-					return extract_integer_bits_32(buffer + offset, n_integers); // beg, n
-				}
-				else if (n_integers > 8)
-				{
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 16), _mm_set1_epi8('0')); // todo 8 suffice
-
-					fio::memcpy(first, buffer + offset, n_integers);
-
-					return extract_integer_bits_16(buffer + offset, n_integers); // beg, n
-				}
-				else
-				{
-					// todo fewer?
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 0), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 16), _mm_set1_epi8('0'));
-
-					fio::memcpy(first, buffer + offset, n_integers);
-
-					fio::uint64 bits = extract_integer_bits_8(buffer + offset, n_integers); // beg, n
-
-					unsigned long index;
-					_BitScanReverse64(&index, bits);
-
-					const unsigned int exp = 127 + index - 1; // the one is added back again as the 25th bit of the mantissa
-
-					const int more = 24 - index;
-					if (more > 0)
-					{
-						const unsigned int available = more; // todo assume there is always the correct amount available
-						fio::memcpy(dot + 1, buffer + 8, available);
-
-						const fio::uint64 more_bits = extract_decimal_bits_24(buffer + 8, more); // beg, n
-
-						bits = (exp << 24) + ((bits << more) | more_bits);
-					}
-					else
-					{
-						bits = (exp << 24) + (bits >> (index - 24));
-					}
-
-					const unsigned long long rounded = bits + 1; // note may overflow into exponent
-					return static_cast<unsigned int>(rounded >> 1);
-				}
-			}
-			else
-			{
-				const auto n_zeroes = -n_integers - 1;
-				if (n_zeroes < 46)
-				{
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 0), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 16), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 32), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 48), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 64), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 80), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 96), _mm_set1_epi8('0'));
-					_mm_store_si128(reinterpret_cast<__m128i *>(buffer + 112), _mm_set1_epi8('0'));
-
-					static const fio::uint8 required_digits[46] = {
-						28, 30, 32, 35, 37, 39, 42, 44, 46, 49, 51, 53, 56, 58, 60, 63, 65, 67, 70, 72, 74, 77, 79, 81, 84, 86, 88, 91, 93, 95, 97, 100, 102, 104, 107, 109, 111, 113, 112, 111, 110, 109, 108, 107, 106, 105,
-					};
-
-					const fio::usize available = static_cast<fio::usize>(last - first);
-					const fio::usize count = available < required_digits[n_zeroes] ? available : required_digits[n_zeroes];
-					fio::memcpy(first, buffer + 128 - required_digits[n_zeroes], count);
-
-					fio::uint64 valg;
-					fio::uint64 valf;
-					fio::uint64 vale;
-					fio::uint64 vald;
-					fio::uint64 valc;
-					fio::uint64 valb;
-					fio::uint64 vala;
-					fio::uint64 valz; // at most 9
-					extract_integer_32(buffer + 32, valz, vala);
-					extract_integer_32(buffer + 64, valb, valc);
-					extract_integer_32(buffer + 96, vald, vale);
-					extract_integer_32(buffer + 128, valf, valg);
-
-					static const unsigned long long denominators[46][8][3] = {
-						{ {16225927682921337, 0, 0}, {39614081257132169, 0, 0}, {1}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {5192296858534827629, 0, 0}, {1}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {16481947188333068751, 36, 0}, {1}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {1152921504607, 0, 0}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {604462909807315, 0, 0}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {39614081257132169, 0, 0}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {14783955820913345207, 1, 0}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {545673798139537739, 59, 0}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {9241489220749011347, 30948, 0}, {1}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {1934281311383407, 0, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {253530120045645881, 0, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {14783955820913345207, 1, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {16503551413014162057, 188, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {7494647606406928093, 198070, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {2699442461655512651, 12980742, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {8670538443036954087, 10889035741, 0}, {1}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {9762294514781471889, 11, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {16503551413014162057, 188, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {5536128266792618279, 633825, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {8727421805997189671, 166153499, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {8670538443036954087, 10889035741, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {2642288987520351985, 9134385233318, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {15408495767769702249, 598631070650737, 0}, {1}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {5536128266792618279, 633825, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {2895828445369772503, 265845599, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {7529911443791671953, 69689828745, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {1321144493760175993, 4567192616659, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {2691303730436425989, 3831238852164722, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {1971277250102393653, 502168138830934461, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {10140024425764638827, 16455045573212060421, 0}, {1}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {12988327758750611785, 34844914372, 0}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {1076627130581305705, 29230032746618, 0}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {2691303730436425989, 3831238852164722, 0}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {1971277250102393653, 502168138830934461, 0}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {15422499392788156965, 7710398526309305619, 11}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {865119391821669287, 2865761711822312790, 2993}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {5193155008627850229, 7917911339171543649, 196159}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {16611413540376147735, 5470823367985906411, 944473}, {2691303730436425989, 3831238852164722, 0}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {1496253268323035203, 408217133286861182, 803469}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {9597435353935534609, 4713740301749103199, 200867}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {17340580483737799491, 7506746565359719755, 25108}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {9085101588108306793, 10161715357524740777, 3138}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {10944112390718391959, 2940950219058990250, 196}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {5979700067267186899, 9590990814237149589, 24}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {12276677554476868123, 1198873851779643698, 3}, {1}, },
-						{ {16225927682921337, 0, 0}, {7591182125049451957, 14, 0}, {5979391860423864507, 236118, 0}, {9843675500044451025, 7737125245, 0}, {1564089289045153947, 4056481920730334, 0}, {3511393333235066575, 11121167568117138797, 3}, {10759939715039024913, 1766847064778384329, 0}, {1}, },
-					};
-
-					static const unsigned char skips[46][8][2] = {
-						{ {1, 27}, {1, 19}, },
-						{ {1, 27}, {1, 33}, },
-						{ {1, 27}, {1, 47}, },
-						{ {1, 27}, {1, 41}, {0, 54},  },
-						{ {1, 27}, {1, 41}, {1, 6}, },
-						{ {1, 27}, {1, 41}, {1, 19}, },
-						{ {1, 27}, {1, 41}, {1, 38}, },
-						{ {1, 27}, {1, 41}, {1, 50}, },
-						{ {1, 27}, {1, 41}, {2, 2}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {1, 10}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {1, 24}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {1, 38}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {1, 54}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 7}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 20}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 39}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {1, 43}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {1, 54}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 11}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 26}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 39}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 58}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {3, 7}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 11}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 29}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 44}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 57}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {3, 12}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {3, 26}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {3, 38}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {2, 43}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {2, 62}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {3, 12}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {3, 26}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {3, 44}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {3, 59}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 8}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {2, 57}, {3, 12} },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 17}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 15}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 12}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 9}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 5}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {4, 2}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {3, 63}, },
-						{ {1, 27}, {1, 41}, {1, 55}, {2, 6}, {2, 25}, {2, 39}, {3, 58}, },
-					};
-
-					// (z * (10**112) + aaaaaaaaaaaaaaaa * (10**96) + bbbbbbbbbbbbbbbb * (10**80) + cccccccccccccccc * (10**64) + dddddddddddddddd * (10**48) + eeeeeeeeeeeeeeee * (10**32) + ffffffffffffffff * (10**16) + ggggggggggggggg) // (5**150)
-					// (z * (2**112) + (aaaaaaaaaaaaaaaa * (2**96) + (bbbbbbbbbbbbbbbb * (2**80) + (cccccccccccccccc * (2**64) + (dddddddddddddddd * (2**48) + (eeeeeeeeeeeeeeee * (2**32) + (ffffffffffffffff * (2**16) + (ggggggggggggggg) // (5**16)) // (5**16)) // (5**16)) // (5**16)) // (5**16)) // (5**16)) // (5**16)) // (5**38)
-					//                                                                                                                                                                        |70----------------------|   |16 all ones---------------|
-					//                                                                                                                                          |86----------------------|   |32 all ones---------------------------------------------------------|
-					//                                                                                                            |102---------------------|   |48 all ones--------
-					//                                                                              |118---------------------|   |64 all ones--------
-					//                                                |134---------------------|   |80 all ones --------
-					//                  |150---------------------|   |96 all ones--------
-					//  |116-------|   |112 all ones--------
-
-					// needed to increase tmps[6] because shifting may access tmps[4+2]
-					unsigned long long tmps[7] = {}; // actually important to zero tmps[3], see 0b0'00110101'00000000000000000000000
-
-					unsigned long long g0 = __umulh(valg, 16225927682921337) >> 27; // divide by 5**16
-
-					multiply_integer_2(__shiftleft128(valf, 0, 16), (valf << 16) + g0, denominators[n_zeroes][1], tmps);
-					unsigned long long f0 = __shiftright128(tmps[1], tmps[1 + 1], skips[n_zeroes][1][1]);
-					if (!fio_expect(tmps[1 + 2] == 0))
-						return static_cast<unsigned int>(-1);
-
-					multiply_integer_2(__shiftleft128(vale, 0, 32), (vale << 32) + f0, denominators[n_zeroes][2], tmps);
-					unsigned long long e0 = __shiftright128(tmps[skips[n_zeroes][2][0]], tmps[skips[n_zeroes][2][0] + 1], skips[n_zeroes][2][1]);
-					if (!fio_expect(tmps[skips[n_zeroes][2][0] + 2] == 0))
-						return static_cast<unsigned int>(-1);
-
-					multiply_integer_2(__shiftleft128(vald, 0, 48), (vald << 48) + e0, denominators[n_zeroes][3], tmps);
-					unsigned long long d0 = __shiftright128(tmps[skips[n_zeroes][3][0]], tmps[skips[n_zeroes][3][0] + 1], skips[n_zeroes][3][1]);
-					if (!fio_expect(tmps[skips[n_zeroes][3][0] + 2] == 0))
-						return static_cast<unsigned int>(-1);
-
-					multiply_integer_2(valc, d0, denominators[n_zeroes][4], tmps);
-					unsigned long long c0 = __shiftright128(tmps[skips[n_zeroes][4][0]], tmps[skips[n_zeroes][4][0] + 1], skips[n_zeroes][4][1]);
-					unsigned long long c1 = tmps[skips[n_zeroes][4][0] + 1] >> skips[n_zeroes][4][1];
-					if (!fio_expect(tmps[skips[n_zeroes][4][0] + 2] == 0))
-						return static_cast<unsigned int>(-1);
-
-					multiply_integer_3(__shiftleft128(valb, 0, 16), (valb << 16) + c1, c0, denominators[n_zeroes][5], tmps);
-					unsigned long long b0 = __shiftright128(tmps[skips[n_zeroes][5][0]], tmps[skips[n_zeroes][5][0] + 1], skips[n_zeroes][5][1]);
-					unsigned long long b1 = __shiftright128(tmps[skips[n_zeroes][5][0] + 1], tmps[skips[n_zeroes][5][0] + 2], skips[n_zeroes][5][1]);
-
-					multiply_integer_3(__shiftleft128(vala, 0, 32), (vala << 32) + b1, b0, denominators[n_zeroes][6], tmps);
-					unsigned long long a0 = __shiftright128(tmps[skips[n_zeroes][6][0]], tmps[skips[n_zeroes][6][0] + 1], skips[n_zeroes][6][1]);
-					unsigned long long a1 = __shiftright128(tmps[skips[n_zeroes][6][0] + 1], tmps[skips[n_zeroes][6][0] + 2], skips[n_zeroes][6][1]);
-
-					tmps[4] = 0;
-					tmps[5] = 0;
-
-					multiply_integer_2((valz << 48) + a1, a0, denominators[n_zeroes][7], tmps);
-					unsigned long long z0 = __shiftright128(tmps[skips[n_zeroes][7][0]], tmps[skips[n_zeroes][7][0] + 1], skips[n_zeroes][7][1]);
-
-					unsigned long long bits = z0;
-
-					if (bits == 0) // underflow
-						return 0;
-
-					unsigned long index;
-					_BitScanReverse64(&index, bits);
-
-					if (index >= 24)
-					{
-						const unsigned int exp_base = 150 - (static_cast<unsigned int>(n_zeroes) + required_digits[n_zeroes]);
-						const unsigned int exp = exp_base + (index - 24);
-
-						bits = (exp << 24) + (bits >> (index - 24));
-
-						const unsigned long long rounded = bits + 1; // note may overflow into exponent
-						return static_cast<unsigned int>(rounded >> 1);
-					}
-					else // probably subnormal (but could overflow to become normal)
-					{
-						const fio::uint64 rounded = bits + 1;
-						return static_cast<unsigned int>(rounded >> 1);
-					}
-				}
-				else // underflow
-				{
-					return 0;
-				}
-			}
-		}
+		buffer[magnitude][0] = static_cast<char>(static_cast<unsigned char>(size));
 	}
 
-	fio_inline
-	const char * from_chars(const char * begin, const char * end, float & value)
+	BENCHMARK_DUMP("plot/from_chars_float32_in_betweens.dump", lin_style, 0, 255, 1, "magnitude (exponent + 128)")
 	{
-		if (begin == end)
-			return nullptr; // error
-
-		const bool is_negative = *begin == '-';
-		if (is_negative)
+		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
 		{
-			begin++;
+			const char * const data = buffer[meter.size()] + 1;
 
-			if (begin == end)
-				return nullptr; // error
-		}
-
-		// skip zeroes
-		if (*begin == '0')
-		{
-			do
+			meter.measure([&](int)
 			{
-				begin++;
+				float val;
+				std::sscanf(data, "%f", &val);
+				return val;
+			});
+		};
 
-				if (begin == end)
-					return nullptr; // todo value = 0
-			}
-			while (*begin == '0');
-		}
-
-		const char * last;
-		const char * dot = begin;
-		if (*begin == '.')
+		BENCHMARK_GROUP("strtof (std)")(Catch::Benchmark::Groupometer meter)
 		{
-			// skip more zeroes
-			do
+			const char * const data = buffer[meter.size()] + 1;
+
+			meter.measure([&](int)
 			{
-				begin++;
+				char * end;
+				return std::strtof(data, &end);
+			});
+		};
 
-				if (begin == end)
-					break;
-			}
-			while (*begin == '0');
-
-			last = begin;
-		}
-		else
+#if ((__cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)) &&\
+    ((defined(_MSC_VER) && _MSC_VER >= 1924) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11))
+		BENCHMARK_GROUP("from\\_chars (std)")(Catch::Benchmark::Groupometer meter)
 		{
-			// todo change to skip digits
-			do
+			const fio::usize size = buffer[meter.size()][0];
+			const char * const begin = buffer[meter.size()] + 1;
+			const char * const end = begin + size;
+
+			meter.measure([&](int)
 			{
-				dot++;
+				float val;
+				std::from_chars(begin, end, val);
+				return val;
+			});
+		};
+#endif
 
-				if (dot == end)
-					break;
-			}
-			while (*dot >= '0' && *dot <= '9');
-
-			last = dot;
-		}
-
-		if (last != end)
+#if HAVE_EASTDC
+		BENCHMARK_GROUP("Sscanf (eastdc)")(Catch::Benchmark::Groupometer meter)
 		{
-			// skip to end
-			do
+			const char * const data = buffer[meter.size()] + 1;
+
+			meter.measure([&](int)
 			{
-				last++;
+				float val;
+				EA::StdC::Sscanf(data, "%f", &val);
+				return val;
+			});
+		};
+#endif
 
-				if (last == end)
-					break;
-			}
-			while (*last >= '0' && *last <= '9');
-		}
-
-		// todo exponent
-
-		fio::uint32 bits = detail::float_bits(begin, dot, last);
-		if (is_negative)
+		BENCHMARK_GROUP("from\\_chars")(Catch::Benchmark::Groupometer meter)
 		{
-			bits |= 0b1'00000000'00000000000000000000000;
-		}
+			const fio::usize size = static_cast<unsigned char>(buffer[meter.size()][0]);
+			const char * const begin = buffer[meter.size()] + 1;
+			const char * const end = begin + size;
 
-		value = *reinterpret_cast<const float *>(&bits);
-
-		return last;
+			meter.measure([&](int)
+			{
+				float val;
+				fio::from_chars(begin, end, val);
+				return val;
+			});
+		};
 	}
 }
+
+#if ((__cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)) &&\
+    ((defined(_MSC_VER) && _MSC_VER >= 1924) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11))
+TEST_CASE("from_chars float32 shortest", "[.][dump]")
+{
+	char buffer[255][2][50];
+	for (unsigned int magnitude = 0b00000000; magnitude < 0b11111111; magnitude++)
+	{
+		const unsigned int valuelo = (magnitude << 23) + 0;
+		const float valuelo_as_float = fio::bit_cast<float>(valuelo);
+		const auto reslo = std::to_chars(buffer[magnitude][0] + 1, buffer[magnitude][0] + 50, valuelo_as_float);
+		REQUIRE(reslo.ec == std::errc{});
+
+		buffer[magnitude][0][0] = 0; // paranoid
+
+		fio::usize sizelo = static_cast<fio::usize>(reslo.ptr - buffer[magnitude][0]);
+		if (buffer[magnitude][0][sizelo] == '0')
+		{
+			do
+			{
+				sizelo--;
+			}
+			while (buffer[magnitude][0][sizelo] == '0');
+		}
+
+		buffer[magnitude][0][0] = static_cast<unsigned char>(sizelo);
+
+		const unsigned int valuehi = (magnitude << 23) + 0b11111111111111111111111;
+		const float valuehi_as_float = fio::bit_cast<float>(valuehi);
+		const auto reshi = std::to_chars(buffer[magnitude][1] + 1, buffer[magnitude][1] + 50, valuehi_as_float);
+		REQUIRE(reshi.ec == std::errc{});
+
+		buffer[magnitude][1][0] = 0; // paranoid
+
+		fio::usize sizehi = static_cast<fio::usize>(reshi.ptr - buffer[magnitude][1]);
+		if (buffer[magnitude][1][sizehi] == '0')
+		{
+			do
+			{
+				sizehi--;
+			}
+			while (buffer[magnitude][1][sizehi] == '0');
+		}
+
+		buffer[magnitude][1][0] = static_cast<unsigned char>(sizehi);
+	}
+
+	BENCHMARK_DUMP("plot/from_chars_float32_shortest.dump", lin_style, 0, 255, 1, "magnitude (exponent + 128)")
+	{
+		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
+		{
+			const char * const datalo = buffer[meter.size()][0] + 1;
+			const char * const datahi = buffer[meter.size()][1] + 1;
+
+			meter.measure([&](int)
+			{
+				float vallo;
+				std::sscanf(datalo, "%f", &vallo);
+				float valhi;
+				std::sscanf(datahi, "%f", &valhi);
+				return valhi - vallo;
+			});
+		};
+
+		BENCHMARK_GROUP("strtof (std)")(Catch::Benchmark::Groupometer meter)
+		{
+			const char * const datalo = buffer[meter.size()][0] + 1;
+			const char * const datahi = buffer[meter.size()][1] + 1;
+
+			meter.measure([&](int)
+			{
+				char * end;
+				return std::strtof(datahi, &end) - std::strtof(datalo, &end);
+			});
+		};
+
+		BENCHMARK_GROUP("from\\_chars (std)")(Catch::Benchmark::Groupometer meter)
+		{
+			const fio::usize sizelo = buffer[meter.size()][0][0];
+			const fio::usize sizehi = buffer[meter.size()][1][0];
+			const char * const beginlo = buffer[meter.size()][0] + 1;
+			const char * const beginhi = buffer[meter.size()][1] + 1;
+			const char * const endlo = beginlo + sizelo;
+			const char * const endhi = beginhi + sizehi;
+
+			meter.measure([&](int)
+			{
+				float vallo;
+				std::from_chars(beginlo, endlo, vallo);
+				float valhi;
+				std::from_chars(beginhi, endhi, valhi);
+				return valhi - vallo;
+			});
+		};
+
+#if HAVE_EASTDC
+		BENCHMARK_GROUP("Sscanf (eastdc)")(Catch::Benchmark::Groupometer meter)
+		{
+			const char * const datalo = buffer[meter.size()][0] + 1;
+			const char * const datahi = buffer[meter.size()][1] + 1;
+
+			meter.measure([&](int)
+			{
+				float vallo;
+				EA::StdC::Sscanf(datalo, "%f", &vallo);
+				float valhi;
+				EA::StdC::Sscanf(datahi, "%f", &valhi);
+				return valhi - vallo;
+			});
+		};
+#endif
+
+		BENCHMARK_GROUP("from\\_chars")(Catch::Benchmark::Groupometer meter)
+		{
+			const fio::usize sizelo = buffer[meter.size()][0][0];
+			const fio::usize sizehi = buffer[meter.size()][1][0];
+			const char * const beginlo = buffer[meter.size()][0] + 1;
+			const char * const beginhi = buffer[meter.size()][1] + 1;
+			const char * const endlo = beginlo + sizelo;
+			const char * const endhi = beginhi + sizehi;
+
+			meter.measure([&](int)
+			{
+				float vallo;
+				fio::from_chars(beginlo, endlo, vallo);
+				float valhi;
+				fio::from_chars(beginhi, endhi, valhi);
+				return valhi - vallo;
+			});
+		};
+	}
+}
+#endif
 
 #include <iostream>
 #include <fstream>
 #include <bitset>
 
-TEST_CASE("from_chars float32", "[.][dump]")
+TEST_CASE("from_chars float32 in-betweens test", "[.][test]")
 {
 	char digits[][1 + 2 + 150 + 1] = {
 		"00.000000000000000000000000000000000000000000000700649232162408535461864791644958065640130970938257885878534141944895541342930300743319094181060791015625",
@@ -2029,8 +1381,12 @@ TEST_CASE("from_chars float32", "[.][dump]")
 	//                                       0.9999999701976776123046875                                                                                                                              > 0b0'01111111'00000000000000000000000 -- 0b0'10010110'11111111111111111111111 <                                16777215.4
 	//                                16777215.5                                                                                                                                                      > 0b0'10010111'00000000000000000000000 -- 0b0'11111110'11111111111111111111111 < 340282356779733661637539395458142568447
 	// 340282356779733661637539395458142568448                                                                                                                                                        > 0b0'11111111'00000000000000000000000
-	if (0)
-	for (int magnitude = 0b10110100; magnitude < 0b11111111; magnitude++)
+#if defined(__clang__)
+#elif defined(__GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+	for (unsigned int magnitude = 0b00000000; magnitude < 0b11111111; magnitude++)
 	{
 		std::cout << "magnitude = " << std::bitset<8>(magnitude) << '\n';
 
@@ -2088,7 +1444,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				offset--;
 				do
 				{
-					char digit = dot[offset] - carry;
+					int digit = dot[offset] - carry;
 					if (digit < '0')
 					{
 						digit += 10;
@@ -2097,7 +1453,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 					{
 						carry = 0;
 					}
-					dot[offset] = digit;
+					dot[offset] = static_cast<char>(digit);
 					if (carry == 0)
 						goto done_dec;
 
@@ -2112,7 +1468,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				{
 					offset--;
 
-					char digit = digits[magnitude][offset] - carry;
+					int digit = digits[magnitude][offset] - carry;
 					if (digit < '0')
 					{
 						digit += 10;
@@ -2121,7 +1477,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 					{
 						carry = 0;
 					}
-					digits[magnitude][offset] = digit;
+					digits[magnitude][offset] = static_cast<char>(digit);
 					if (carry == 0)
 						goto done_dec;
 				}
@@ -2129,9 +1485,9 @@ TEST_CASE("from_chars float32", "[.][dump]")
 			}
 		done_dec:
 
-			float fval;
-			from_chars(begin, last, fval);
-			REQUIRE(*reinterpret_cast<const unsigned int *>(&fval) == value + 0);
+			float fval = fio::bit_cast<float>(-1);
+			fio::from_chars(begin, last, fval);
+			REQUIRE(fio::bit_cast<unsigned int>(fval) == value + 0);
 
 			carry = 1;
 			offset = last - dot;
@@ -2140,7 +1496,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				offset--;
 				do
 				{
-					char digit = dot[offset] + carry;
+					int digit = dot[offset] + carry;
 					if (digit > '9')
 					{
 						digit -= 10;
@@ -2149,7 +1505,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 					{
 						carry = 0;
 					}
-					dot[offset] = digit;
+					dot[offset] = static_cast<char>(digit);
 					if (carry == 0)
 						goto done_inc;
 
@@ -2164,7 +1520,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				{
 					offset--;
 
-					char digit = digits[magnitude][offset] + carry;
+					int digit = digits[magnitude][offset] + carry;
 					if (digit > '9')
 					{
 						digit -= 10;
@@ -2173,7 +1529,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 					{
 						carry = 0;
 					}
-					digits[magnitude][offset] = digit;
+					digits[magnitude][offset] = static_cast<char>(digit);
 					if (carry == 0)
 						goto done_inc;
 				}
@@ -2181,9 +1537,9 @@ TEST_CASE("from_chars float32", "[.][dump]")
 			}
 		done_inc:
 
-			float gval;
-			from_chars(begin, last, gval);
-			REQUIRE(*reinterpret_cast<const unsigned int *>(&gval) == value + 1);
+			float gval = fio::bit_cast<float>(-1);
+			fio::from_chars(begin, last, gval);
+			REQUIRE(fio::bit_cast<unsigned int>(gval) == value + 1);
 
 			carry = 0;
 			offset = last - dot;
@@ -2194,7 +1550,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				offset--;
 				do
 				{
-					char digit = dot[offset] + beg[offset] + carry;
+					int digit = dot[offset] + beg[offset] + carry;
 					if (digit > '9')
 					{
 						carry = 1;
@@ -2204,7 +1560,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 					{
 						carry = 0;
 					}
-					dot[offset] = digit;
+					dot[offset] = static_cast<char>(digit);
 					offset--;
 				}
 				while (offset != 0);
@@ -2216,7 +1572,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				{
 					offset--;
 
-					char digit = digits[magnitude][offset] + steps[magnitude][offset] + carry;
+					int digit = digits[magnitude][offset] + steps[magnitude][offset] + carry;
 					if (digit > '9')
 					{
 						carry = 1;
@@ -2226,7 +1582,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 					{
 						carry = 0;
 					}
-					digits[magnitude][offset] = digit;
+					digits[magnitude][offset] = static_cast<char>(digit);
 				}
 				while (offset != 0);
 			}
@@ -2247,7 +1603,10 @@ TEST_CASE("from_chars float32", "[.][dump]")
 			}
 		}
 	}
-
+#if defined(__clang__)
+#elif defined(__GNUC__)
+# pragma GCC diagnostic pop
+#endif
 	// generate tables
 	if (0)
 	{
@@ -2259,8 +1618,8 @@ TEST_CASE("from_chars float32", "[.][dump]")
 			buffer[0] = '0';
 
 			const unsigned int next = value + 1;
-			const float value_as_float = *reinterpret_cast<const float *>(&value);
-			const float next_as_float = *reinterpret_cast<const float *>(&next);
+			const float value_as_float = fio::bit_cast<float>(value);
+			const float next_as_float = fio::bit_cast<float>(next);
 			const double middle = static_cast<double>(value_as_float) * .5 + static_cast<double>(next_as_float) * .5;
 			const int length = std::snprintf(buffer + 1, 300 - 1, "%.200f", middle) + 1; // note null-terminates buffer
 
@@ -2274,7 +1633,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				while (*(last - 1) == '0');
 			}
 
-			file << "\t\"" << std::string_view(buffer, last - buffer) << "\",\n";
+			file << "\t\"" << std::string_view(buffer, static_cast<fio::usize>(last - buffer)) << "\",\n";
 		}
 		file << "};\n";
 		file << "signed char steps[][1 + 2 + 150 + 1] = {\n";
@@ -2287,14 +1646,14 @@ TEST_CASE("from_chars float32", "[.][dump]")
 			signed char buffer_steps[300];
 
 			const unsigned int next = value + 1;
-			const float value_as_float = *reinterpret_cast<const float *>(&value);
-			const float next_as_float = *reinterpret_cast<const float *>(&next);
+			const float value_as_float = fio::bit_cast<float>(value);
+			const float next_as_float = fio::bit_cast<float>(next);
 			const int length_current = std::snprintf(buffer_current + 1, 300 - 1, "%.200f", static_cast<double>(value_as_float)) + 1; // note null-terminates buffer
 			const int length_next = std::snprintf(buffer_next + 1, 300 - 1, "%.200f", static_cast<double>(next_as_float)) + 1; // note null-terminates buffer
 			const int length = length_current < length_next ? length_current : length_next;
 
 			fio::ssize offset = length;
-			signed char diff;
+			int diff;
 			do
 			{
 				offset--;
@@ -2324,7 +1683,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				{
 					borrow = 0;
 				}
-				signed char step = diff + carry;
+				int step = diff + carry;
 				if (step > 9)
 				{
 					carry = 1;
@@ -2334,7 +1693,7 @@ TEST_CASE("from_chars float32", "[.][dump]")
 				{
 					carry = 0;
 				}
-				buffer_steps[offset] = step;
+				buffer_steps[offset] = static_cast<signed char>(step);
 			}
 			while (offset > 0);
 
@@ -2352,71 +1711,579 @@ TEST_CASE("from_chars float32", "[.][dump]")
 			file << "},\n";
 		}
 		file << "};\n";
-	}
-
-	BENCHMARK_DUMP("plot/from_chars_float32.dump", lin_style, 0, 256, 1, "magnitude (exponent + 127)")
-	{
-		BENCHMARK_GROUP("sscanf (std)")(Catch::Benchmark::Groupometer meter)
+#if ((__cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)) &&\
+    ((defined(_MSC_VER) && _MSC_VER >= 1924) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11))
+		file << "char shortest_representations[][1 + 2 + 150 + 1] = {\n";
+		for (unsigned int value = 0b0'00000000'00000000000000000000000; value < 0b0'11111111'00000000000000000000000; value += 0b0'00000001'00000000000000000000000)
 		{
-			const char * const buffer = digits[meter.size()] + 1;
+			char buffer[300];
 
-			meter.measure([&](int)
-			{
-				float val;
-				std::sscanf(buffer, "%f", &val);
-				return val;
-			});
-		};
+			const unsigned int valuelo = value + 0;
+			const float valuelo_as_float = fio::bit_cast<float>(valuelo);
+			const auto reslo = std::to_chars(buffer + 0, buffer + 300, valuelo_as_float);
 
-		BENCHMARK_GROUP("strtof (std)")(Catch::Benchmark::Groupometer meter)
+			file << "\t\"" << std::string_view(buffer, reslo.ptr - buffer) << "\",\n";
+		}
+		file << '\n';
+		for (unsigned int value = 0b0'00000000'00000000000000000000000; value < 0b0'11111111'00000000000000000000000; value += 0b0'00000001'00000000000000000000000)
 		{
-			const char * const buffer = digits[meter.size()] + 1;
+			char buffer[300];
 
-			meter.measure([&](int)
-			{
-				char * end;
-				return std::strtof(buffer, &end);
-			});
-		};
+			const unsigned int valuehi = value + 0b11111111111111111111111;
+			const float valuehi_as_float = fio::bit_cast<float>(valuehi);
+			const auto reshi = std::to_chars(buffer + 0, buffer + 300, valuehi_as_float);
 
-#if (__cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
-		BENCHMARK_GROUP("from\\_chars (std)")(Catch::Benchmark::Groupometer meter)
-		{
-			const char * const buffer = digits[meter.size()] + 1;
-
-			meter.measure([&](int)
-			{
-				float val;
-				std::from_chars(buffer, buffer + 154 - 1 - 1, val);
-				return val;
-			});
-		};
+			file << "\t\"" << std::string_view(buffer, reshi.ptr - buffer) << "\",\n";
+		}
+		file << "};\n";
 #endif
-
-#if HAVE_EASTDC
-		BENCHMARK_GROUP("Sscanf (eastdc)")(Catch::Benchmark::Groupometer meter)
-		{
-			const char * const buffer = digits[meter.size()] + 1;
-
-			meter.measure([&](int)
-			{
-				float val;
-				EA::StdC::Sscanf(buffer, "%f", &val);
-				return val;
-			});
-		};
-#endif
-
-		BENCHMARK_GROUP("from\\_chars")(Catch::Benchmark::Groupometer meter)
-		{
-			const char * const buffer = digits[meter.size()] + 1;
-
-			meter.measure([&](int)
-			{
-				float val;
-				/*fio::*/from_chars(buffer, buffer + 154 - 1 - 1, val);
-				return val;
-			});
-		};
 	}
 }
+
+#if ((__cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)) &&\
+    ((defined(_MSC_VER) && _MSC_VER >= 1924) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11))
+TEST_CASE("from_chars float32 shortest test", "[.][test]")
+{
+	static const char * shortest_representations[] = {
+		"0",
+		"1.1754944e-38",
+		"2.3509887e-38",
+		"4.7019774e-38",
+		"9.403955e-38",
+		"1.880791e-37",
+		"3.761582e-37",
+		"7.523164e-37",
+		"1.5046328e-36",
+		"3.0092655e-36",
+		"6.018531e-36",
+		"1.2037062e-35",
+		"2.4074124e-35",
+		"4.814825e-35",
+		"9.62965e-35",
+		"1.92593e-34",
+		"3.85186e-34",
+		"7.70372e-34",
+		"1.540744e-33",
+		"3.081488e-33",
+		"6.162976e-33",
+		"1.2325952e-32",
+		"2.4651903e-32",
+		"4.9303807e-32",
+		"9.8607613e-32",
+		"1.9721523e-31",
+		"3.9443045e-31",
+		"7.888609e-31",
+		"1.5777218e-30",
+		"3.1554436e-30",
+		"6.3108872e-30",
+		"1.2621775e-29",
+		"2.524355e-29",
+		"5.04871e-29",
+		"1.009742e-28",
+		"2.019484e-28",
+		"4.038968e-28",
+		"8.077936e-28",
+		"1.6155871e-27",
+		"3.2311743e-27",
+		"6.4623485e-27",
+		"1.2924697e-26",
+		"2.5849394e-26",
+		"5.169879e-26",
+		"1.0339758e-25",
+		"2.0679515e-25",
+		"4.135903e-25",
+		"8.271806e-25",
+		"1.6543612e-24",
+		"3.3087225e-24",
+		"6.617445e-24",
+		"1.323489e-23",
+		"2.646978e-23",
+		"5.293956e-23",
+		"1.0587912e-22",
+		"2.1175824e-22",
+		"4.2351647e-22",
+		"8.4703295e-22",
+		"1.6940659e-21",
+		"3.3881318e-21",
+		"6.7762636e-21",
+		"1.3552527e-20",
+		"2.7105054e-20",
+		"5.421011e-20",
+		"1.0842022e-19",
+		"2.1684043e-19",
+		"4.3368087e-19",
+		"8.6736174e-19",
+		"1.7347235e-18",
+		"3.469447e-18",
+		"6.938894e-18",
+		"1.3877788e-17",
+		"2.7755576e-17",
+		"5.551115e-17",
+		"1.110223e-16",
+		"2.220446e-16",
+		"4.440892e-16",
+		"8.881784e-16",
+		"1.7763568e-15",
+		"3.5527137e-15",
+		"7.1054274e-15",
+		"1.4210855e-14",
+		"2.842171e-14",
+		"5.684342e-14",
+		"1.1368684e-13",
+		"2.2737368e-13",
+		"4.5474735e-13",
+		"9.094947e-13",
+		"1.8189894e-12",
+		"3.637979e-12",
+		"7.275958e-12",
+		"1.4551915e-11",
+		"2.910383e-11",
+		"5.820766e-11",
+		"1.1641532e-10",
+		"2.3283064e-10",
+		"4.656613e-10",
+		"9.313226e-10",
+		"1.8626451e-09",
+		"3.7252903e-09",
+		"7.450581e-09",
+		"1.4901161e-08",
+		"2.9802322e-08",
+		"5.9604645e-08",
+		"1.1920929e-07",
+		"2.3841858e-07",
+		"4.7683716e-07",
+		"9.536743e-07",
+		"1.9073486e-06",
+		"3.8146973e-06",
+		"7.6293945e-06",
+		"1.5258789e-05",
+		"3.0517578e-05",
+		"6.1035156e-05",
+		"0.00012207031",
+		"0.00024414062",
+		"0.00048828125",
+		"0.0009765625",
+		"0.001953125",
+		"0.00390625",
+		"0.0078125",
+		"0.015625",
+		"0.03125",
+		"0.0625",
+		"0.125",
+		"0.25",
+		"0.5",
+		"1",
+		"2",
+		"4",
+		"8",
+		"16",
+		"32",
+		"64",
+		"128",
+		"256",
+		"512",
+		"1024",
+		"2048",
+		"4096",
+		"8192",
+		"16384",
+		"32768",
+		"65536",
+		"131072",
+		"262144",
+		"524288",
+		"1048576",
+		"2097152",
+		"4194304",
+		"8388608",
+		"16777216",
+		"33554432",
+		"67108864",
+		"134217728",
+		"268435456",
+		"536870912",
+		"1073741824",
+		"2147483648",
+		"4294967296",
+		"8589934592",
+		"17179869184",
+		"34359738368",
+		"68719476736",
+		"137438953472",
+		"274877906944",
+		"549755813888",
+		"1099511627776",
+		"2199023255552",
+		"4398046511104",
+		"8.796093e+12",
+		"1.7592186e+13",
+		"3.5184372e+13",
+		"7.0368744e+13",
+		"1.4073749e+14",
+		"2.8147498e+14",
+		"5.6294995e+14",
+		"1.1258999e+15",
+		"2.2517998e+15",
+		"4.5035996e+15",
+		"9.007199e+15",
+		"1.8014399e+16",
+		"3.6028797e+16",
+		"7.2057594e+16",
+		"1.4411519e+17",
+		"2.8823038e+17",
+		"5.7646075e+17",
+		"1.1529215e+18",
+		"2.305843e+18",
+		"4.611686e+18",
+		"9.223372e+18",
+		"1.8446744e+19",
+		"3.689349e+19",
+		"7.378698e+19",
+		"1.4757395e+20",
+		"2.951479e+20",
+		"5.902958e+20",
+		"1.1805916e+21",
+		"2.3611832e+21",
+		"4.7223665e+21",
+		"9.444733e+21",
+		"1.8889466e+22",
+		"3.7778932e+22",
+		"7.5557864e+22",
+		"1.5111573e+23",
+		"3.0223145e+23",
+		"6.044629e+23",
+		"1.2089258e+24",
+		"2.4178516e+24",
+		"4.8357033e+24",
+		"9.671407e+24",
+		"1.9342813e+25",
+		"3.8685626e+25",
+		"7.7371252e+25",
+		"1.5474251e+26",
+		"3.0948501e+26",
+		"6.1897002e+26",
+		"1.2379401e+27",
+		"2.4758801e+27",
+		"4.9517602e+27",
+		"9.9035203e+27",
+		"1.9807041e+28",
+		"3.9614081e+28",
+		"7.9228163e+28",
+		"1.5845633e+29",
+		"3.1691265e+29",
+		"6.338253e+29",
+		"1.2676506e+30",
+		"2.5353012e+30",
+		"5.0706024e+30",
+		"1.0141205e+31",
+		"2.028241e+31",
+		"4.056482e+31",
+		"8.112964e+31",
+		"1.6225928e+32",
+		"3.2451855e+32",
+		"6.490371e+32",
+		"1.2980742e+33",
+		"2.5961484e+33",
+		"5.192297e+33",
+		"1.0384594e+34",
+		"2.0769187e+34",
+		"4.1538375e+34",
+		"8.307675e+34",
+		"1.661535e+35",
+		"3.32307e+35",
+		"6.64614e+35",
+		"1.329228e+36",
+		"2.658456e+36",
+		"5.316912e+36",
+		"1.0633824e+37",
+		"2.1267648e+37",
+		"4.2535296e+37",
+		"8.507059e+37",
+		"1.7014118e+38",
+
+		"1.1754942e-38",
+		"2.3509886e-38",
+		"4.701977e-38",
+		"9.403954e-38",
+		"1.8807908e-37",
+		"3.7615817e-37",
+		"7.5231634e-37",
+		"1.5046327e-36",
+		"3.0092654e-36",
+		"6.0185307e-36",
+		"1.20370614e-35",
+		"2.4074123e-35",
+		"4.8148246e-35",
+		"9.629649e-35",
+		"1.9259298e-34",
+		"3.8518597e-34",
+		"7.7037193e-34",
+		"1.5407439e-33",
+		"3.0814877e-33",
+		"6.1629755e-33",
+		"1.2325951e-32",
+		"2.4651902e-32",
+		"4.9303804e-32",
+		"9.860761e-32",
+		"1.9721521e-31",
+		"3.9443043e-31",
+		"7.8886086e-31",
+		"1.5777217e-30",
+		"3.1554434e-30",
+		"6.310887e-30",
+		"1.2621774e-29",
+		"2.5243547e-29",
+		"5.0487095e-29",
+		"1.0097419e-28",
+		"2.0194838e-28",
+		"4.0389676e-28",
+		"8.077935e-28",
+		"1.615587e-27",
+		"3.231174e-27",
+		"6.462348e-27",
+		"1.2924696e-26",
+		"2.5849393e-26",
+		"5.1698785e-26",
+		"1.0339757e-25",
+		"2.0679514e-25",
+		"4.1359028e-25",
+		"8.2718056e-25",
+		"1.6543611e-24",
+		"3.3087223e-24",
+		"6.6174445e-24",
+		"1.3234889e-23",
+		"2.6469778e-23",
+		"5.2939556e-23",
+		"1.0587911e-22",
+		"2.1175822e-22",
+		"4.2351645e-22",
+		"8.470329e-22",
+		"1.6940658e-21",
+		"3.3881316e-21",
+		"6.776263e-21",
+		"1.3552526e-20",
+		"2.7105053e-20",
+		"5.4210105e-20",
+		"1.0842021e-19",
+		"2.1684042e-19",
+		"4.3368084e-19",
+		"8.673617e-19",
+		"1.7347234e-18",
+		"3.4694467e-18",
+		"6.9388935e-18",
+		"1.3877787e-17",
+		"2.7755574e-17",
+		"5.5511148e-17",
+		"1.11022296e-16",
+		"2.2204459e-16",
+		"4.4408918e-16",
+		"8.8817837e-16",
+		"1.7763567e-15",
+		"3.5527135e-15",
+		"7.105427e-15",
+		"1.4210854e-14",
+		"2.8421708e-14",
+		"5.6843415e-14",
+		"1.1368683e-13",
+		"2.2737366e-13",
+		"4.5474732e-13",
+		"9.0949465e-13",
+		"1.8189893e-12",
+		"3.6379786e-12",
+		"7.275957e-12",
+		"1.4551914e-11",
+		"2.9103829e-11",
+		"5.8207657e-11",
+		"1.16415315e-10",
+		"2.3283063e-10",
+		"4.6566126e-10",
+		"9.313225e-10",
+		"1.862645e-09",
+		"3.72529e-09",
+		"7.45058e-09",
+		"1.490116e-08",
+		"2.980232e-08",
+		"5.960464e-08",
+		"1.1920928e-07",
+		"2.3841856e-07",
+		"4.7683713e-07",
+		"9.5367426e-07",
+		"1.9073485e-06",
+		"3.814697e-06",
+		"7.629394e-06",
+		"1.5258788e-05",
+		"3.0517576e-05",
+		"6.1035153e-05",
+		"0.000122070305",
+		"0.00024414061",
+		"0.00048828122",
+		"0.00097656244",
+		"0.0019531249",
+		"0.0039062498",
+		"0.0078124995",
+		"0.015624999",
+		"0.031249998",
+		"0.062499996",
+		"0.12499999",
+		"0.24999999",
+		"0.49999997",
+		"0.99999994",
+		"1.9999999",
+		"3.9999998",
+		"7.9999995",
+		"15.999999",
+		"31.999998",
+		"63.999996",
+		"127.99999",
+		"255.99998",
+		"511.99997",
+		"1023.99994",
+		"2047.9999",
+		"4095.9998",
+		"8191.9995",
+		"16383.999",
+		"32767.998",
+		"65535.996",
+		"131071.99",
+		"262143.98",
+		"524287.97",
+		"1048575.94",
+		"2097151.9",
+		"4194303.8",
+		"8388607.5",
+		"16777215",
+		"33554430",
+		"67108860",
+		"134217720",
+		"268435440",
+		"536870880",
+		"1073741760",
+		"2147483520",
+		"4294967040",
+		"8589934080",
+		"17179868160",
+		"34359736320",
+		"68719472640",
+		"137438945280",
+		"274877890560",
+		"549755781120",
+		"1099511562240",
+		"2199023124480",
+		"4398046248960",
+		"8796092497920",
+		"1.7592185e+13",
+		"3.518437e+13",
+		"7.036874e+13",
+		"1.4073748e+14",
+		"2.8147496e+14",
+		"5.6294992e+14",
+		"1.12589984e+15",
+		"2.2517997e+15",
+		"4.5035994e+15",
+		"9.0071987e+15",
+		"1.8014397e+16",
+		"3.6028795e+16",
+		"7.205759e+16",
+		"1.4411518e+17",
+		"2.8823036e+17",
+		"5.7646072e+17",
+		"1.15292144e+18",
+		"2.3058429e+18",
+		"4.6116857e+18",
+		"9.2233715e+18",
+		"1.8446743e+19",
+		"3.6893486e+19",
+		"7.378697e+19",
+		"1.4757394e+20",
+		"2.9514789e+20",
+		"5.9029578e+20",
+		"1.18059155e+21",
+		"2.3611831e+21",
+		"4.7223662e+21",
+		"9.4447324e+21",
+		"1.8889465e+22",
+		"3.777893e+22",
+		"7.555786e+22",
+		"1.5111572e+23",
+		"3.0223144e+23",
+		"6.0446287e+23",
+		"1.20892575e+24",
+		"2.4178515e+24",
+		"4.835703e+24",
+		"9.671406e+24",
+		"1.9342812e+25",
+		"3.8685624e+25",
+		"7.737125e+25",
+		"1.547425e+26",
+		"3.09485e+26",
+		"6.1897e+26",
+		"1.23794e+27",
+		"2.47588e+27",
+		"4.95176e+27",
+		"9.90352e+27",
+		"1.980704e+28",
+		"3.961408e+28",
+		"7.922816e+28",
+		"1.5845632e+29",
+		"3.1691263e+29",
+		"6.3382526e+29",
+		"1.2676505e+30",
+		"2.535301e+30",
+		"5.070602e+30",
+		"1.0141204e+31",
+		"2.0282408e+31",
+		"4.0564817e+31",
+		"8.1129634e+31",
+		"1.6225927e+32",
+		"3.2451853e+32",
+		"6.4903707e+32",
+		"1.2980741e+33",
+		"2.5961483e+33",
+		"5.1922965e+33",
+		"1.0384593e+34",
+		"2.0769186e+34",
+		"4.1538372e+34",
+		"8.3076745e+34",
+		"1.6615349e+35",
+		"3.3230698e+35",
+		"6.6461396e+35",
+		"1.3292279e+36",
+		"2.6584558e+36",
+		"5.3169117e+36",
+		"1.06338233e+37",
+		"2.1267647e+37",
+		"4.2535293e+37",
+		"8.5070587e+37",
+		"1.7014117e+38",
+		"3.4028235e+38",
+	};
+
+	for (int magnitude = 0b10011101; magnitude < 0b11111111; magnitude++)
+	{
+		const unsigned int valuelo = (magnitude << 23) + 0;
+		const unsigned int valuehi = (magnitude << 23) + 0b11111111111111111111111;
+
+		fio::usize lengthlo = 0;
+		do
+		{
+			lengthlo++;
+		}
+		while (shortest_representations[magnitude + 0][lengthlo] != 0);
+
+		fio::usize lengthhi = 0;
+		do
+		{
+			lengthhi++;
+		}
+		while (shortest_representations[magnitude + 255][lengthhi] != 0);
+
+		float floatlo = fio::bit_cast<float>(-1);
+		REQUIRE(fio::from_chars(shortest_representations[magnitude + 0], shortest_representations[magnitude + 0] + lengthlo, floatlo));
+		REQUIRE(fio::bit_cast<unsigned int>(floatlo) == valuelo);
+
+		float floathi = fio::bit_cast<float>(-1);
+		REQUIRE(fio::from_chars(shortest_representations[magnitude + 255], shortest_representations[magnitude + 255] + lengthhi, floathi));
+		REQUIRE(fio::bit_cast<unsigned int>(floathi) == valuehi);
+	}
+}
+#endif

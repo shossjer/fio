@@ -7,8 +7,10 @@ set(FIOLIB_SOURCES
 set(FIOLIB_HEADERS
 	lib/fio/compiler.hpp
 	lib/fio/from_chars.hpp
+	lib/fio/intrinsics.hpp
 	lib/fio/io.hpp
 	lib/fio/mem.hpp
+	lib/fio/stdhacks.hpp
 	lib/fio/stdint.hpp
 	lib/fio/stdio.hpp
 	lib/fio/to_chars.hpp

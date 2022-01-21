@@ -1,25 +1,33 @@
 #pragma once
 
-#if defined(__clang__)
+#ifndef __has_builtin
+# define __has_builtin(x) 0
+#endif
+
+#if defined(_DEBUG) || !defined(NDEBUG)
+// in debug, breaks into debugger before crashing, otherwise optimizes
+// assuming that the expression is true
+# define fio_assert(x) static_cast<void>((x) ? true : (fio_break(), fio_crash(), false))
+#else
+// in debug, breaks into debugger before crashing, otherwise optimizes
+// assuming that the expression is true
+# define fio_assert(x) fio_assume(x)
+#endif
+
+#if __has_builtin(__builtin_assume)
 // optimize knowing that the expression is true
 # define fio_assume(x) __builtin_assume(x)
-#elif defined(__GNUC__)
-// optimize knowing that the expression is true
-# define fio_assume(x) static_cast<void>((x) || (fio_unreachable(), false))
 #elif defined(_MSC_VER)
 // optimize knowing that the expression is true
 # define fio_assume(x) __assume(x)
 #else
-# error Missing implementation!
+// optimize knowing that the expression is true
+# define fio_assume(x) static_cast<void>((x) ? true : (fio_unreachable(), false))
 #endif
 
-#if defined(__clang__)
-# if __has_builtin(__builtin_debugtrap)
+#if __has_builtin(__builtin_debugtrap)
 // break into the debugger
-#  define fio_break() __builtin_debugtrap()
-# else
-#  error Missing implementation!
-# endif
+# define fio_break() __builtin_debugtrap()
 #elif defined(_MSC_VER)
 // break into the debugger
 # define fio_break() __debugbreak()
@@ -30,11 +38,25 @@
 # error Missing implementation!
 #endif
 
+#if __has_builtin(__builtin_trap) || defined(__GNUC__)
+// crash the process
+# define fio_crash() __builtin_trap()
+#elif defined(_MSC_VER)
+// crash the process
+# define fio_crash() __fastfail(0)
+// failure code zero should not be used, but we should not crash
+// either so :shrug:
+#else
+# error Missing implementation!
+#endif
+
 #if defined(_DEBUG) || !defined(NDEBUG)
-// breaks into the debugger if false (in debug builds), optimize knowing that the expression is true (in nondebug builds)
+// breaks into the debugger if false (in debug builds), optimize
+// knowing that the expression is true (in nondebug builds)
 # define fio_expect(x) ((x) ? true : (fio_break(), false))
 #else
-// breaks into the debugger if false (in debug builds), optimize knowing that the expression is true (in nondebug builds)
+// breaks into the debugger if false (in debug builds), optimize
+// knowing that the expression is true (in nondebug builds)
 # define fio_expect(x) (fio_assume(x), true)
 #endif
 
@@ -82,7 +104,8 @@
 # define fio_thread
 #endif
 
-#if defined(__GNUC__)
+#if __has_builtin(__builtin_unreachable) ||\
+	(defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && (__GNUC_MINOR__ >= 5))))
 // optimize knowing that this branch is impossible
 # define fio_unreachable() __builtin_unreachable()
 #elif defined(_MSC_VER)
