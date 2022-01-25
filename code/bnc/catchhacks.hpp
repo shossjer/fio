@@ -50,7 +50,7 @@ namespace Catch
 				int type; // linear(0) or logarithmic(1)
 				//int reps;
 
-				std::vector<unsigned int> xs;
+				std::vector<size_t> xs;
 				std::vector<group> groups;
 
 				~Dump()
@@ -117,7 +117,7 @@ namespace Catch
 				{
 					xs.resize((to - from) * 2);
 
-					unsigned int size = 1u << from;
+					size_t size = static_cast<size_t>(1) << from;
 
 					auto begin = xs.begin();
 					auto end = xs.end();
@@ -148,7 +148,7 @@ namespace Catch
 					auto * y_ptr = groups.back().ys.data();
 					for (unsigned int sizei = 0; sizei < xs.size(); sizei++)
 					{
-						const unsigned int size = xs[sizei];
+						const size_t size = xs[sizei];
 
 						auto how_long = std::chrono::duration_cast<ClockDuration<Clock>>(run_time);
 						ClockDuration<Clock> test_elapsed(0);
