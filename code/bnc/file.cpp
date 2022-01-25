@@ -338,7 +338,7 @@ TEST_CASE("file write", "[.][dump]")
 				{
 					ssize_t wrote = ::write(fd, end - remaining, remaining);
 
-					remaining -= wrote;
+					remaining -= static_cast<size_t>(wrote);
 				}
 				while (remaining > 0);
 				::close(fd);
@@ -351,7 +351,7 @@ TEST_CASE("file write", "[.][dump]")
 			{
 				int fd = ::open("bnc.tmp", O_RDWR | O_CREAT /*| O_EXCL*/, 0664);
 				size_t file_size = meter.size();
-				int kjhs1 = ::ftruncate(fd, file_size);
+				int kjhs1 = ::ftruncate(fd, static_cast<ssize_t>(file_size));
 				fio_unused(kjhs1);
 				void * map = ::mmap(nullptr, file_size, PROT_WRITE, MAP_SHARED, fd, 0);
 				size_t remaining = meter.size();
@@ -370,15 +370,15 @@ TEST_CASE("file write", "[.][dump]")
 
 		BENCHMARK_GROUP("mmap offset (posix)")(Catch::Benchmark::Groupometer meter)
 		{
-			const size_t pagesize = ::sysconf(_SC_PAGESIZE);
+			const ssize_t pagesize = ::sysconf(_SC_PAGESIZE);
 
 			meter.measure([&](int)
 			{
 				int fd = ::open("bnc.tmp", O_RDWR | O_CREAT /*| O_EXCL*/, 0664);
-				size_t file_size = pagesize;
-				int kjhs1 = ::ftruncate(fd, file_size);
+				size_t file_size = static_cast<size_t>(pagesize);
+				int kjhs1 = ::ftruncate(fd, static_cast<ssize_t>(file_size));
 				fio_unused(kjhs1);
-				void * map = ::mmap(nullptr, pagesize, PROT_WRITE, MAP_SHARED, fd, 0);
+				void * map = ::mmap(nullptr, static_cast<size_t>(pagesize), PROT_WRITE, MAP_SHARED, fd, 0);
 				size_t remaining = meter.size();
 
 				int kjhs2;
@@ -386,13 +386,13 @@ TEST_CASE("file write", "[.][dump]")
 
 				do
 				{
-					kjhs2 = ::ftruncate(fd, file_size + pagesize);
+					kjhs2 = ::ftruncate(fd, static_cast<ssize_t>(file_size) + pagesize);
 					fio_unused(kjhs2);
-					map = ::mmap(map, pagesize, PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, file_size);
-					file_size += pagesize;
+					map = ::mmap(map, static_cast<size_t>(pagesize), PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, static_cast<ssize_t>(file_size));
+					file_size += static_cast<size_t>(pagesize);
 
 				entry:
-					size_t count = remaining < pagesize ? remaining : pagesize;
+					size_t count = remaining < static_cast<size_t>(pagesize) ? remaining : static_cast<size_t>(pagesize);
 					remaining -= count;
 					char * end = static_cast<char *>(map) + count;
 					do
@@ -404,8 +404,8 @@ TEST_CASE("file write", "[.][dump]")
 				}
 				while (remaining > 0);
 
-				::munmap(map, pagesize);
-				int kjhs3 = ::ftruncate(fd, meter.size());
+				::munmap(map, static_cast<size_t>(pagesize));
+				int kjhs3 = ::ftruncate(fd, static_cast<ssize_t>(meter.size()));
 				fio_unused(kjhs3);
 				::close(fd);
 			});
@@ -413,22 +413,22 @@ TEST_CASE("file write", "[.][dump]")
 
 		BENCHMARK_GROUP("mmap + remap (linux)")(Catch::Benchmark::Groupometer meter)
 		{
-			const size_t pagesize = ::sysconf(_SC_PAGESIZE);
+			const ssize_t pagesize = ::sysconf(_SC_PAGESIZE);
 
 			meter.measure([&](int)
 			{
 				int fd = ::open("bnc.tmp", O_RDWR | O_CREAT /*| O_EXCL*/, 0664);
-				size_t file_size = pagesize;
-				int kjhs1 = ::ftruncate(fd, file_size);
+				size_t file_size = static_cast<size_t>(pagesize);
+				int kjhs1 = ::ftruncate(fd, static_cast<ssize_t>(file_size));
 				fio_unused(kjhs1);
 				void * map = ::mmap(nullptr, file_size, PROT_WRITE, MAP_SHARED, fd, 0);
 				size_t remaining = meter.size();
 
-				if (remaining > pagesize)
+				if (remaining > static_cast<size_t>(pagesize))
 				{
 					do
 					{
-						size_t count = pagesize;
+						size_t count = static_cast<size_t>(pagesize);
 						remaining -= count;
 						char * end = static_cast<char *>(map) + file_size;
 						do
@@ -438,12 +438,12 @@ TEST_CASE("file write", "[.][dump]")
 						}
 						while (count > 0);
 
-						int kjhs2 = ::ftruncate(fd, file_size + pagesize);
+						int kjhs2 = ::ftruncate(fd, static_cast<ssize_t>(file_size) + pagesize);
 						fio_unused(kjhs2);
-						map = ::mremap(map, file_size, file_size + pagesize, MREMAP_MAYMOVE);
-						file_size += pagesize;
+						map = ::mremap(map, file_size, file_size + static_cast<size_t>(pagesize), MREMAP_MAYMOVE);
+						file_size += static_cast<size_t>(pagesize);
 					}
-					while (remaining > pagesize);
+					while (remaining > static_cast<size_t>(pagesize));
 				}
 				{
 					char * end = static_cast<char *>(map) + meter.size();
@@ -456,7 +456,7 @@ TEST_CASE("file write", "[.][dump]")
 				}
 
 				::munmap(map, file_size);
-				int kjhs3 = ::ftruncate(fd, meter.size());
+				int kjhs3 = ::ftruncate(fd, static_cast<ssize_t>(meter.size()));
 				fio_unused(kjhs3);
 				::close(fd);
 			});
@@ -464,12 +464,12 @@ TEST_CASE("file write", "[.][dump]")
 
 		BENCHMARK_GROUP("mmap offset double (posix)")(Catch::Benchmark::Groupometer meter)
 		{
-			const size_t pagesize = ::sysconf(_SC_PAGESIZE);
+			const ssize_t pagesize = ::sysconf(_SC_PAGESIZE);
 
 			meter.measure([&](int)
 			{
 				int fd = ::open("bnc.tmp", O_RDWR | O_CREAT /*| O_EXCL*/, 0664);
-				size_t file_size = pagesize;
+				size_t file_size = static_cast<size_t>(pagesize);
 				size_t offset = 0;
 				size_t remaining = meter.size();
 
@@ -480,9 +480,9 @@ TEST_CASE("file write", "[.][dump]")
 					offset += file_size;
 					file_size *= 2;
 				entry:
-					int kjhs2 = ::ftruncate(fd, offset + file_size);
+					int kjhs2 = ::ftruncate(fd, static_cast<ssize_t>(offset + file_size));
 					fio_unused(kjhs2);
-					void * map = ::mmap(nullptr, file_size, PROT_WRITE, MAP_SHARED, fd, offset);
+					void * map = ::mmap(nullptr, file_size, PROT_WRITE, MAP_SHARED, fd, static_cast<ssize_t>(offset));
 
 					size_t count = remaining < file_size ? remaining : file_size;
 					remaining -= count;
@@ -498,7 +498,7 @@ TEST_CASE("file write", "[.][dump]")
 				}
 				while (remaining > 0);
 
-				int kjhs3 = ::ftruncate(fd, meter.size());
+				int kjhs3 = ::ftruncate(fd, static_cast<ssize_t>(meter.size()));
 				fio_unused(kjhs3);
 				::close(fd);
 			});
@@ -506,13 +506,13 @@ TEST_CASE("file write", "[.][dump]")
 
 		BENCHMARK_GROUP("mmap + remap double (linux)")(Catch::Benchmark::Groupometer meter)
 		{
-			const size_t pagesize = ::sysconf(_SC_PAGESIZE);
+			const ssize_t pagesize = ::sysconf(_SC_PAGESIZE);
 
 			meter.measure([&](int)
 			{
 				int fd = ::open("bnc.tmp", O_RDWR | O_CREAT /*| O_EXCL*/, 0664);
-				size_t file_size = pagesize;
-				int kjhs1 = ::ftruncate(fd, file_size);
+				size_t file_size = static_cast<size_t>(pagesize);
+				int kjhs1 = ::ftruncate(fd, static_cast<ssize_t>(file_size));
 				fio_unused(kjhs1);
 				void * map = ::mmap(nullptr, file_size, PROT_WRITE, MAP_SHARED, fd, 0);
 				size_t remaining = meter.size();
@@ -532,7 +532,7 @@ TEST_CASE("file write", "[.][dump]")
 						}
 						while (count > 0);
 
-						int kjhs2 = ::ftruncate(fd, file_size * 2);
+						int kjhs2 = ::ftruncate(fd, static_cast<ssize_t>(file_size * 2));
 						fio_unused(kjhs2);
 						map = ::mremap(map, file_size, file_size * 2, MREMAP_MAYMOVE);
 						available = file_size;
@@ -551,7 +551,7 @@ TEST_CASE("file write", "[.][dump]")
 				}
 
 				::munmap(map, file_size);
-				int kjhs3 = ::ftruncate(fd, meter.size());
+				int kjhs3 = ::ftruncate(fd, static_cast<ssize_t>(meter.size()));
 				fio_unused(kjhs3);
 				::close(fd);
 			});
