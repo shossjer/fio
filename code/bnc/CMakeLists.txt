@@ -5,6 +5,7 @@ set(FIOBNC_SOURCES
 	bnc/fio/mem.cpp
 	bnc/fio/stdio.cpp
 	bnc/fio/to_chars.cpp
+	bnc/file.cpp
 	)
 
 set(FIOBNC_HEADERS
