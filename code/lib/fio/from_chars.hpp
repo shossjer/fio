@@ -1408,8 +1408,9 @@ namespace fio
 	fio_inline
 	const char * from_chars(const char * begin, const char * end, float & value)
 	{
+		const char * const error = begin;
 		if (begin == end)
-			return nullptr; // error
+			return error; // not a number
 
 		const bool is_negative = *begin == '-';
 		if (is_negative)
@@ -1417,7 +1418,7 @@ namespace fio
 			begin++;
 
 			if (begin == end)
-				return nullptr; // error
+				return error; // not a number
 		}
 
 		// 0 = zero   x = non-zero   z = maybe zero   . = dot   : = maybe dot
@@ -1433,17 +1434,16 @@ namespace fio
 		const char * last;
 		fio::ssize exp;
 		end = detail::float_parse(begin, end, first, dot, last, exp);
+		if (end == nullptr)
+			return error;
 
-		if (end != nullptr)
+		fio::uint32 bits = detail::float_bits(first, dot, last, exp);
+		if (is_negative)
 		{
-			fio::uint32 bits = detail::float_bits(first, dot, last, exp);
-			if (is_negative)
-			{
-				bits |= 0b1'00000000'00000000000000000000000;
-			}
-
-			value = fio::bit_cast<float>(bits);
+			bits |= 0b1'00000000'00000000000000000000000;
 		}
+
+		value = fio::bit_cast<float>(bits);
 
 		return end;
 	}
