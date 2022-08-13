@@ -1440,7 +1440,7 @@ namespace fio
 		fio::uint32 bits = detail::float_bits(first, dot, last, exp);
 		if (is_negative)
 		{
-			bits |= 0b1'00000000'00000000000000000000000;
+			bits |= 0x80000000;
 		}
 
 		value = fio::bit_cast<float>(bits);
